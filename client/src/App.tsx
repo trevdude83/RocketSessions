@@ -89,7 +89,7 @@ function SessionManager() {
             <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
           </Link>
           <div className="banner-center">
-            <div className="banner-title">Rocket League Session Manager</div>
+            <div className="banner-title">Session Manager</div>
           </div>
           <div className="banner-actions">
             <details className="menu">

@@ -2,6 +2,9 @@
 
 A local, unofficial Rocket League session tracker for two Xbox players. This project uses Tracker Network data via `trn-rocket-league`, stores snapshots in SQLite, and visualizes deltas and trends.
 
+## Disclaimer
+Rocket League is a trademark of Psyonix, LLC. This project is unaffiliated with and not endorsed by Psyonix, Epic Games, or Tracker Network.
+
 ## Setup
 
 1) Install dependencies from the repo root:

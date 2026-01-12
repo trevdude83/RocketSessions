@@ -10,12 +10,7 @@ export default function Landing() {
           <Link to="/">
             <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
           </Link>
-          <div className="banner-center">
-            <div>
-              <div className="banner-title">Rocket League Session Manager</div>
-              <p className="banner-subtitle">Track sessions, capture snapshots, and review team growth.</p>
-            </div>
-          </div>
+          <div className="banner-center"></div>
           <div className="banner-actions">
             <ThemeToggle />
           </div>
