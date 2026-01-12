@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   getApiKeyStatus,
   getCoachPacket,
@@ -30,6 +30,7 @@ import {
   CartesianGrid
 } from "recharts";
 import ThemeToggle from "./ThemeToggle";
+import BuildInfo from "./BuildInfo";
 
 export default function SystemAdmin() {
   const navigate = useNavigate();
@@ -309,7 +310,9 @@ export default function SystemAdmin() {
     <div className="app">
       <header className="header">
         <div className="banner">
-          <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          <Link to="/">
+            <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          </Link>
           <div className="banner-center">
             <div className="banner-title">System admin</div>
           </div>
@@ -655,12 +658,13 @@ export default function SystemAdmin() {
       </main>
       <footer className="footer">
         <div className="footer-banner">
-          <nav className="footer-links">
-            <a href="#" aria-label="Find out more">Find out more</a>
-            <a href="#" aria-label="About this website">About this website</a>
-            <a href="#" aria-label="Accessibility statement">Accessibility statement</a>
-            <a href="#" aria-label="Contact">Contact</a>
-          </nav>
+          <div className="footer-meta">
+            <nav className="footer-links">
+              <a href="https://github.com/trevdude83/RocketSessions" aria-label="Find out more">Find out more</a>
+              <a href="#" aria-label="Contact">Contact</a>
+            </nav>
+            <BuildInfo />
+          </div>
         </div>
       </footer>
     </div>

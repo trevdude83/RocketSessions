@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { backfillSessionSnapshots, endSession, getSessionDetail, getSummary, refreshSessionWithCooldown, startSession, stopSession } from "../api";
 import { SessionDetail, SummaryResponse } from "../types";
 import PlayerCard from "./PlayerCard";
@@ -8,6 +8,7 @@ import RankChart from "./RankChart";
 import TeamSessionStats from "./TeamSessionStats";
 import CoachPanel from "./CoachPanel";
 import ThemeToggle from "./ThemeToggle";
+import BuildInfo from "./BuildInfo";
 
 export default function SessionDashboard() {
   const { id } = useParams();
@@ -184,7 +185,9 @@ export default function SessionDashboard() {
     <div className="app">
       <header className="header">
         <div className="banner">
-          <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          <Link to="/">
+            <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          </Link>
           <div className="banner-center">
             <div className="banner-title">
               Session - {detail.session.name} ({detail.session.mode})
@@ -264,12 +267,13 @@ export default function SessionDashboard() {
       </main>
       <footer className="footer">
         <div className="footer-banner">
-          <nav className="footer-links">
-            <a href="#" aria-label="Find out more">Find out more</a>
-            <a href="#" aria-label="About this website">About this website</a>
-            <a href="#" aria-label="Accessibility statement">Accessibility statement</a>
-            <a href="#" aria-label="Contact">Contact</a>
-          </nav>
+          <div className="footer-meta">
+            <nav className="footer-links">
+              <a href="https://github.com/trevdude83/RocketSessions" aria-label="Find out more">Find out more</a>
+              <a href="#" aria-label="Contact">Contact</a>
+            </nav>
+            <BuildInfo />
+          </div>
         </div>
       </footer>
     </div>

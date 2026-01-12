@@ -1,5 +1,6 @@
 {
   "name": "rl-session-tracker",
+  "version": "0.1.1",
   "private": true,
   "workspaces": [
     "server",

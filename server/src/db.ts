@@ -443,11 +443,13 @@ export function deleteSession(sessionId: number): void {
   const deletePlayers = db.prepare("DELETE FROM players WHERE sessionId = ?");
   const deleteSessionRow = db.prepare("DELETE FROM sessions WHERE id = ?");
   const deleteTeamStats = db.prepare("DELETE FROM session_team_stats WHERE sessionId = ?");
+  const deleteCoachReports = db.prepare("DELETE FROM coach_reports WHERE sessionId = ?");
 
   const run = db.transaction(() => {
     deleteSnapshots.run(sessionId);
     deletePlayers.run(sessionId);
     deleteTeamStats.run(sessionId);
+    deleteCoachReports.run(sessionId);
     deleteSessionRow.run(sessionId);
   });
 

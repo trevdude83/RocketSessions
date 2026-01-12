@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { generateTeamCoachReport, getLatestTeamCoachReport, getTeam, getTeamCurrentRanks, getTeamPeakRatings, listTeamAggregateCoachReports, listTeamCoachReports } from "../api";
 import { Team, TeamAggregateCoachReport, TeamCoachReportListItem, TeamPlayerCurrentRank, TeamPlayerPeakRating } from "../types";
 import { formatRank } from "../utils/rank";
 import ThemeToggle from "./ThemeToggle";
+import BuildInfo from "./BuildInfo";
 import {
   CartesianGrid,
   Cell,
@@ -259,7 +260,9 @@ const chartData = useMemo(() => {
       <div className="app">
         <header className="header">
           <div className="banner">
-            <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+            <Link to="/">
+              <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+            </Link>
             <div className="banner-center">
               <div className="banner-title">Team dashboard</div>
             </div>
@@ -292,7 +295,9 @@ const chartData = useMemo(() => {
     <div className="app">
       <header className="header">
         <div className="banner">
-          <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          <Link to="/">
+            <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          </Link>
           <div className="banner-center">
             <div className="banner-title">Team dashboard</div>
           </div>
@@ -935,12 +940,13 @@ const chartData = useMemo(() => {
       )}
       <footer className="footer">
         <div className="footer-banner">
-          <nav className="footer-links">
-            <a href="#" aria-label="Find out more">Find out more</a>
-            <a href="#" aria-label="About this website">About this website</a>
-            <a href="#" aria-label="Accessibility statement">Accessibility statement</a>
-            <a href="#" aria-label="Contact">Contact</a>
-          </nav>
+          <div className="footer-meta">
+            <nav className="footer-links">
+              <a href="https://github.com/trevdude83/RocketSessions" aria-label="Find out more">Find out more</a>
+              <a href="#" aria-label="Contact">Contact</a>
+            </nav>
+            <BuildInfo />
+          </div>
         </div>
       </footer>
     </div>

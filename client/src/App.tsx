@@ -10,6 +10,7 @@ import { Session, Team } from "./types";
 import TeamHistory from "./components/TeamHistory";
 import TeamDashboard from "./components/TeamDashboard";
 import ThemeToggle from "./components/ThemeToggle";
+import BuildInfo from "./components/BuildInfo";
 
 export default function App() {
   return (
@@ -84,7 +85,9 @@ function SessionManager() {
     <div className="app">
       <header className="header">
         <div className="banner">
-          <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          <Link to="/">
+            <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          </Link>
           <div className="banner-center">
             <div className="banner-title">Rocket League Session Manager</div>
           </div>
@@ -228,12 +231,13 @@ function SessionManager() {
       </main>
       <footer className="footer">
         <div className="footer-banner">
-          <nav className="footer-links">
-            <a href="#" aria-label="Find out more">Find out more</a>
-            <a href="#" aria-label="About this website">About this website</a>
-            <a href="#" aria-label="Accessibility statement">Accessibility statement</a>
-            <a href="#" aria-label="Contact">Contact</a>
-          </nav>
+          <div className="footer-meta">
+            <nav className="footer-links">
+              <a href="https://github.com/trevdude83/RocketSessions" aria-label="Find out more">Find out more</a>
+              <a href="#" aria-label="Contact">Contact</a>
+            </nav>
+            <BuildInfo />
+          </div>
         </div>
       </footer>
     </div>

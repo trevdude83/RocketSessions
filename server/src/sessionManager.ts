@@ -65,6 +65,64 @@ function flattenMatches(input: unknown): any[] {
   return matches;
 }
 
+function getFocusPlaylistId(mode: string | null | undefined): number | null {
+  if (mode === "solo") return 10;
+  if (mode === "3v3") return 13;
+  if (mode === "2v2") return 11;
+  return null;
+}
+
+function getFocusPlaylistName(mode: string | null | undefined): string | null {
+  if (mode === "solo") return "Ranked Duel 1v1";
+  if (mode === "3v3") return "Ranked Standard 3v3";
+  if (mode === "2v2") return "Ranked Doubles 2v2";
+  return null;
+}
+
+function toPlaylistId(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = typeof value === "number" ? value : Number(String(value));
+  return Number.isFinite(num) ? num : null;
+}
+
+function getMatchPlaylistId(match: any): number | null {
+  return (
+    toPlaylistId(match?.metadata?.playlistId) ??
+    toPlaylistId(match?.metadata?.playlist?.id) ??
+    toPlaylistId(match?.playlistId) ??
+    toPlaylistId(match?.playlist?.id) ??
+    toPlaylistId(match?.attributes?.playlistId) ??
+    toPlaylistId(match?.attributes?.playlist) ??
+    toPlaylistId(match?.attributes?.playlist?.id) ??
+    null
+  );
+}
+
+function getMatchPlaylistName(match: any): string | null {
+  const raw =
+    match?.metadata?.playlistName ??
+    match?.metadata?.playlist?.name ??
+    match?.playlist?.name ??
+    match?.attributes?.playlistName ??
+    match?.attributes?.playlist?.name ??
+    null;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
+}
+
+function filterMatchesForMode(matches: any[], mode: string | null | undefined): any[] {
+  const targetId = getFocusPlaylistId(mode);
+  const targetName = getFocusPlaylistName(mode);
+  if (!targetId && !targetName) return matches;
+  const withSignal = matches.filter((match) => getMatchPlaylistId(match) !== null || getMatchPlaylistName(match) !== null);
+  const base = withSignal.length > 0 ? withSignal : matches;
+  if (base.length === 0) return base;
+  return base.filter((match) => {
+    const playlistId = getMatchPlaylistId(match);
+    const playlistName = getMatchPlaylistName(match);
+    return (targetId !== null && playlistId === targetId) || (targetName !== null && playlistName === targetName);
+  });
+}
+
 function getMatchId(match: any): string | null {
   const raw =
     match?.id ??
@@ -173,7 +231,7 @@ export async function initializeSession(sessionId: number): Promise<void> {
           () => fetchPlayerSessions(player.platform, player.gamertag),
           { retries: 3, baseDelayMs: 500 }
         );
-        const matches = flattenMatches(sessions);
+        const matches = filterMatchesForMode(flattenMatches(sessions), session?.mode);
         const latest = getLatestMatch(matches);
         if (latest) {
           const latestId = getMatchId(latest);
@@ -207,7 +265,11 @@ export async function pollForNewMatchSnapshots(sessionId: number): Promise<void>
           () => fetchPlayerSessions(player.platform, player.gamertag),
           { retries: 3, baseDelayMs: 500 }
         );
-        const matches = flattenMatches(sessions);
+        const matches = filterMatchesForMode(flattenMatches(sessions), session.mode);
+        const hasTime = matches.some((match) => getMatchTime(match) !== null);
+        const lastMatchInList = player.lastMatchId
+          ? matches.some((match) => getMatchId(match) === player.lastMatchId)
+          : false;
         const latest = getLatestMatch(matches);
         const latestMatchId = getMatchId(latest);
         const latestMatchAt = getMatchTime(latest) ? new Date(getMatchTime(latest)!).toISOString() : null;
@@ -256,6 +318,9 @@ export async function pollForNewMatchSnapshots(sessionId: number): Promise<void>
         }
 
         let newMatches = countNewMatches(matches, player.lastMatchId, player.lastMatchAt);
+        if (!hasTime) {
+          newMatches = 0;
+        }
         if (
           newMatches === 0 &&
           typeof player.lastMatchCount === "number" &&
@@ -265,9 +330,11 @@ export async function pollForNewMatchSnapshots(sessionId: number): Promise<void>
         }
         if (
           newMatches === 0 &&
+          !hasTime &&
           latestMatchId &&
           player.lastMatchId &&
-          latestMatchId !== player.lastMatchId
+          latestMatchId !== player.lastMatchId &&
+          !lastMatchInList
         ) {
           // Fallback when TRN caps match history and timestamps are missing.
           newMatches = 1;

@@ -481,6 +481,57 @@ function normalizeSessions(input: unknown): any[] {
   return [];
 }
 
+function getFocusPlaylistName(mode: string): string | null {
+  if (mode === "solo") return "Ranked Duel 1v1";
+  if (mode === "3v3") return "Ranked Standard 3v3";
+  if (mode === "2v2") return "Ranked Doubles 2v2";
+  return null;
+}
+
+function toPlaylistId(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = typeof value === "number" ? value : Number(String(value));
+  return Number.isFinite(num) ? num : null;
+}
+
+function getMatchPlaylistId(match: any): number | null {
+  return (
+    toPlaylistId(match?.metadata?.playlistId) ??
+    toPlaylistId(match?.metadata?.playlist?.id) ??
+    toPlaylistId(match?.playlistId) ??
+    toPlaylistId(match?.playlist?.id) ??
+    toPlaylistId(match?.attributes?.playlistId) ??
+    toPlaylistId(match?.attributes?.playlist) ??
+    toPlaylistId(match?.attributes?.playlist?.id) ??
+    null
+  );
+}
+
+function getMatchPlaylistName(match: any): string | null {
+  const raw =
+    match?.metadata?.playlistName ??
+    match?.metadata?.playlist?.name ??
+    match?.playlist?.name ??
+    match?.attributes?.playlistName ??
+    match?.attributes?.playlist?.name ??
+    null;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
+}
+
+function filterMatchesForMode(matches: any[], mode: string | null | undefined): any[] {
+  const targetId = getFocusPlaylistId(mode ?? "");
+  const targetName = getFocusPlaylistName(mode ?? "");
+  if (!targetId && !targetName) return matches;
+  const withSignal = matches.filter((match) => getMatchPlaylistId(match) !== null || getMatchPlaylistName(match) !== null);
+  const base = withSignal.length > 0 ? withSignal : matches;
+  if (base.length === 0) return base;
+  return base.filter((match) => {
+    const playlistId = getMatchPlaylistId(match);
+    const playlistName = getMatchPlaylistName(match);
+    return (targetId !== null && playlistId === targetId) || (targetName !== null && playlistName === targetName);
+  });
+}
+
 function getFocusPlaylistId(mode: string): number {
   if (mode === "solo") return 10;
   if (mode === "3v3") return 13;
@@ -656,9 +707,10 @@ function computeSessionTeamStats(sessionId: number) {
 async function computeSessionStats(
   sessionCreatedAt: string,
   platform: string,
-  gamertag: string
+  gamertag: string,
+  mode: string
 ): Promise<{ wins: number | null; losses: number | null; winRate: number | null }> {
-  const cacheKey = `${platform}:${gamertag}`.toLowerCase();
+  const cacheKey = `${platform}:${gamertag}:${mode}`.toLowerCase();
   const cooldownUntil = sessionStatsCooldown.get(cacheKey) ?? 0;
   if (cooldownUntil > Date.now()) {
     return sessionStatsCache.get(cacheKey) ?? { wins: null, losses: null, winRate: null };
@@ -670,7 +722,10 @@ async function computeSessionStats(
     let wins = 0;
     let matches = 0;
 
-    const matchesList = sessions.flatMap((session) => session?.matches ?? (Array.isArray(session) ? session : []));
+    const matchesList = filterMatchesForMode(
+      sessions.flatMap((session) => session?.matches ?? (Array.isArray(session) ? session : [])),
+      mode
+    );
     matchesList.forEach((match: any) => {
       const dateValue = match?.date instanceof Date ? match.date.getTime() : new Date(match?.date).getTime();
       if (!Number.isFinite(dateValue) || dateValue < since) return;
@@ -751,7 +806,8 @@ router.get("/sessions/:id/summary", async (req, res) => {
       sessionStats[player.id] = await computeSessionStats(
         session.createdAt,
         player.platform,
-        player.gamertag
+        player.gamertag,
+        session.mode
       );
     })
   );
@@ -786,7 +842,21 @@ router.get("/sessions/:id/summary", async (req, res) => {
     }
   }
 
-  let teamGameCount = session.matchIndex ?? 0;
+  const focusPlaylistId = getFocusPlaylistId(session.mode);
+  const matchesPlayedValues = players.map((player) => {
+    const baseline = getBaselineSnapshot(player.id);
+    const latest = getLatestSnapshot(player.id);
+    const baselineDerived = parseJson<DerivedMetrics>(baseline?.derivedJson || "");
+    const latestDerived = parseJson<DerivedMetrics>(latest?.derivedJson || "");
+    const playlistBase = baselineDerived?.playlists?.[focusPlaylistId] ?? null;
+    const playlistLatest = latestDerived?.playlists?.[focusPlaylistId] ?? null;
+    const delta = toNumber(playlistLatest?.matchesPlayed) !== null && toNumber(playlistBase?.matchesPlayed) !== null
+      ? (playlistLatest?.matchesPlayed as number) - (playlistBase?.matchesPlayed as number)
+      : null;
+    return typeof delta === "number" ? delta : null;
+  }).filter((value): value is number => typeof value === "number");
+
+  let teamGameCount = matchesPlayedValues.length > 0 ? Math.max(...matchesPlayedValues) : (session.matchIndex ?? 0);
   if (teamGameCount <= 0 && typeof teamWins === "number") {
     teamGameCount = teamWins + (typeof teamLosses === "number" ? teamLosses : 0);
   }

@@ -89,6 +89,7 @@ body {
   height: var(--banner-height);
   background: var(--color-banner-bg);
   color: #ffffff;
+  border-bottom: 3px solid #c0c0c0;
   border-radius: 0;
   width: 100%;
   margin: 0;
@@ -124,6 +125,12 @@ body {
   gap: 12px;
   align-items: center;
   margin-left: auto;
+}
+
+.build-info {
+  font-size: inherit;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .banner-center {
@@ -666,6 +673,15 @@ button:disabled {
   justify-content: center;
 }
 
+.footer-meta {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  flex-wrap: wrap;
+  justify-content: center;
+  text-align: center;
+}
+
 .footer-links {
   display: flex;
   gap: 24px;
@@ -682,6 +698,10 @@ button:disabled {
 
 .footer-links a:hover {
   color: #ffffff;
+}
+
+.footer-meta .build-info {
+  color: rgba(255, 255, 255, 0.7);
 }
 .session-table {
   display: grid;

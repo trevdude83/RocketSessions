@@ -1,12 +1,15 @@
 import { Link } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle";
+import BuildInfo from "./BuildInfo";
 
 export default function Landing() {
   return (
     <div className="app landing">
       <header className="header">
         <div className="banner">
-          <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          <Link to="/">
+            <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          </Link>
           <div className="banner-center">
             <div>
               <div className="banner-title">Rocket League Session Manager</div>
@@ -80,12 +83,13 @@ export default function Landing() {
       </main>
       <footer className="footer">
         <div className="footer-banner">
-          <nav className="footer-links">
-            <a href="#" aria-label="Find out more">Find out more</a>
-            <a href="#" aria-label="About this website">About this website</a>
-            <a href="#" aria-label="Accessibility statement">Accessibility statement</a>
-            <a href="#" aria-label="Contact">Contact</a>
-          </nav>
+          <div className="footer-meta">
+            <nav className="footer-links">
+              <a href="https://github.com/trevdude83/RocketSessions" aria-label="Find out more">Find out more</a>
+              <a href="#" aria-label="Contact">Contact</a>
+            </nav>
+            <BuildInfo />
+          </div>
         </div>
       </footer>
     </div>
