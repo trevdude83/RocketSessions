@@ -1,0 +1,290 @@
+﻿import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { backfillSessionSnapshots, endSession, getSessionDetail, getSummary, refreshSessionWithCooldown, startSession, stopSession } from "../api";
+import { SessionDetail, SummaryResponse } from "../types";
+import PlayerCard from "./PlayerCard";
+import ChartsPanel from "./ChartsPanel";
+import RankChart from "./RankChart";
+import TeamSessionStats from "./TeamSessionStats";
+import CoachPanel from "./CoachPanel";
+import ThemeToggle from "./ThemeToggle";
+
+export default function SessionDashboard() {
+  const { id } = useParams();
+  const sessionId = Number(id);
+  const navigate = useNavigate();
+  const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshCooldownMs, setRefreshCooldownMs] = useState<number | null>(null);
+  const [recomputing, setRecomputing] = useState(false);
+  const [ending, setEnding] = useState(false);
+
+  async function loadSessionData({ withLoading = false } = {}) {
+    if (!sessionId) return;
+    if (withLoading) setLoading(true);
+    setError(null);
+    const [detailResult, summaryResult] = await Promise.allSettled([
+      getSessionDetail(sessionId),
+      getSummary(sessionId)
+    ]);
+
+    if (detailResult.status === "fulfilled") {
+      setDetail(detailResult.value);
+    } else {
+      setDetail(null);
+    }
+
+    if (summaryResult.status === "fulfilled") {
+      setSummary(summaryResult.value);
+    }
+
+    if (detailResult.status === "rejected" || summaryResult.status === "rejected") {
+      const detailMessage = detailResult.status === "rejected" ? detailResult.reason?.message : null;
+      const summaryMessage = summaryResult.status === "rejected" ? summaryResult.reason?.message : null;
+      setError(detailMessage || summaryMessage || "Failed to load session data");
+    }
+
+    if (withLoading) setLoading(false);
+  }
+
+  useEffect(() => {
+    if (!sessionId) return;
+    void loadSessionData({ withLoading: true });
+  }, [sessionId]);
+
+  const players = detail?.players ?? [];
+
+  const deltas = useMemo(() => summary?.deltas ?? {}, [summary]);
+
+  async function handleRefresh() {
+    if (!sessionId) return;
+    if (detail?.session.isEnded) return;
+    if (refreshCooldownMs && refreshCooldownMs > 0) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const detailData = await refreshSessionWithCooldown(sessionId);
+      setDetail(detailData);
+      const summaryData = await getSummary(sessionId);
+      setSummary(summaryData);
+    } catch (err: any) {
+      const retryAfterMs = getRetryAfterMs(err);
+      if (typeof retryAfterMs === "number") {
+        setRefreshCooldownMs(retryAfterMs);
+        setError("TRN rate limited. Refresh will unlock after cooldown.");
+      } else {
+        setError(err.message || "Refresh failed");
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (!detail) return;
+    if (detail.session.isEnded || !detail.session.isActive) return;
+    const intervalSeconds = Number(detail.session.pollingIntervalSeconds || 60);
+    const intervalMs = Math.max(10, intervalSeconds) * 1000;
+    const interval = setInterval(() => {
+      void loadSessionData();
+    }, intervalMs);
+    return () => clearInterval(interval);
+  }, [sessionId, detail]);
+
+  async function handleRecompute() {
+    if (!sessionId) return;
+    setRecomputing(true);
+    setError(null);
+    try {
+      await backfillSessionSnapshots(sessionId);
+      const [detailData, summaryData] = await Promise.all([
+        getSessionDetail(sessionId),
+        getSummary(sessionId)
+      ]);
+      setDetail(detailData);
+      setSummary(summaryData);
+    } catch (err: any) {
+      setError(err.message || "Recompute failed");
+    } finally {
+      setRecomputing(false);
+    }
+  }
+
+  async function handleStop() {
+    if (!sessionId) return;
+    if (detail?.session.isEnded) return;
+    await stopSession(sessionId);
+    const detailData = await getSessionDetail(sessionId);
+    setDetail(detailData);
+  }
+
+  async function handleStart() {
+    if (!sessionId) return;
+    if (detail?.session.isEnded) return;
+    await startSession(sessionId);
+    const detailData = await getSessionDetail(sessionId);
+    setDetail(detailData);
+  }
+
+  async function handleEnd() {
+    if (!sessionId) return;
+    if (detail?.session.isEnded) return;
+    if (!window.confirm("End this session? This cannot be restarted.")) return;
+    setEnding(true);
+    setError(null);
+    try {
+      await endSession(sessionId);
+      const [detailData, summaryData] = await Promise.all([
+        getSessionDetail(sessionId),
+        getSummary(sessionId)
+      ]);
+      setDetail(detailData);
+      setSummary(summaryData);
+      navigate("/");
+    } catch (err: any) {
+      setError(err.message || "Failed to end session");
+    } finally {
+      setEnding(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!refreshCooldownMs || refreshCooldownMs <= 0) return;
+    const interval = setInterval(() => {
+      setRefreshCooldownMs((prev) => {
+        if (!prev || prev <= 1000) return null;
+        return prev - 1000;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [refreshCooldownMs]);
+
+  const refreshLabel = refreshCooldownMs && refreshCooldownMs > 0
+    ? `Refresh (${Math.ceil(refreshCooldownMs / 1000)}s)`
+    : refreshing ? "Refreshing..." : "Refresh now";
+
+  if (loading) {
+    return <div className="app">Loading session...</div>;
+  }
+
+  if (!detail) {
+    return (
+      <div className="app">
+        <p className="error">{error || "Session not found"}</p>
+        <button onClick={() => navigate("/")}>Back</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <header className="header">
+        <div className="banner">
+          <img className="banner-logo" src="/src/assets/logo.png" alt="Session logo" />
+          <div className="banner-center">
+            <div className="banner-title">
+              Session - {detail.session.name} ({detail.session.mode})
+            </div>
+            <span
+              className={
+                detail.session.isEnded
+                  ? "badge ended"
+                  : detail.session.isActive
+                  ? "badge active"
+                  : "badge stopped"
+              }
+            >
+              {detail.session.isEnded ? "Ended" : detail.session.isActive ? "Active" : "Stopped"}
+            </span>
+          </div>
+          <div className="banner-actions">
+            <details className="menu">
+              <summary aria-label="Session menu">
+                <span className="burger">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </span>
+              </summary>
+              <div className="menu-panel">
+                <ThemeToggle />
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing || (refreshCooldownMs ?? 0) > 0 || detail.session.isEnded}
+                >
+                  {refreshLabel}
+                </button>
+                <button
+                  className="secondary"
+                  onClick={detail.session.isActive ? handleStop : handleStart}
+                  disabled={detail.session.isEnded}
+                >
+                  {detail.session.isActive ? "Pause session" : "Continue session"}
+                </button>
+                <button className="secondary" onClick={handleEnd} disabled={ending || detail.session.isEnded}>
+                  {ending ? "Ending..." : "End session"}
+                </button>
+                <button className="ghost" onClick={() => navigate(`/sessions/${sessionId}/advanced`)}>
+                  Advanced
+                </button>
+              </div>
+            </details>
+            <button className="ghost" onClick={() => navigate("/")}>Back</button>
+          </div>
+        </div>
+      </header>
+
+      <main className="page-content">
+        {error && <div className="alert error">{error}</div>}
+
+        <div className="stack">
+          <section className="cards">
+            {players.map((player) => (
+              <PlayerCard
+                key={player.id}
+                player={player}
+                baseline={detail.baselineByPlayerId[player.id]}
+                latest={detail.latestByPlayerId[player.id]}
+                delta={deltas[player.id]}
+              />
+            ))}
+          </section>
+
+          <TeamSessionStats stats={summary?.teamStats} />
+          <ChartsPanel sessionId={sessionId} players={players} />
+
+          <RankChart sessionId={sessionId} players={players} />
+
+          <CoachPanel sessionId={sessionId} mode={detail.session.mode} />
+        </div>
+      </main>
+      <footer className="footer">
+        <div className="footer-banner">
+          <nav className="footer-links">
+            <a href="#" aria-label="Find out more">Find out more</a>
+            <a href="#" aria-label="About this website">About this website</a>
+            <a href="#" aria-label="Accessibility statement">Accessibility statement</a>
+            <a href="#" aria-label="Contact">Contact</a>
+          </nav>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function getRetryAfterMs(error: unknown): number | null {
+  const maybe = (error as { retryAfterMs?: number } | null)?.retryAfterMs;
+  if (typeof maybe === "number") return maybe;
+  const message = (error as { message?: string } | null)?.message;
+  if (!message) return null;
+  try {
+    const parsed = JSON.parse(message) as { retryAfterMs?: number };
+    return typeof parsed.retryAfterMs === "number" ? parsed.retryAfterMs : null;
+  } catch {
+    return null;
+  }
+}
