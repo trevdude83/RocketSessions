@@ -1,10 +1,28 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle";
 import BuildInfo from "./BuildInfo";
+import ImpersonationBanner from "./ImpersonationBanner";
+import SignOutButton from "./SignOutButton";
+import { useAuth } from "../auth";
+import UserBadge from "./UserBadge";
+import { useEffect, useState } from "react";
 
 export default function Landing() {
+  const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [logoutMessage, setLogoutMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (location.state && (location.state as { loggedOut?: boolean }).loggedOut) {
+      setLogoutMessage("You have been signed out.");
+      navigate(".", { replace: true, state: null });
+    }
+  }, [location.state, navigate]);
+
   return (
     <div className="app landing">
+      <ImpersonationBanner />
       <header className="header">
         <div className="banner">
           <Link to="/">
@@ -12,11 +30,16 @@ export default function Landing() {
           </Link>
           <div className="banner-center"></div>
           <div className="banner-actions">
-            <ThemeToggle />
+            <UserBadge />
+            <div className="banner-actions-row">
+              <ThemeToggle />
+              {user && <SignOutButton />}
+            </div>
           </div>
         </div>
       </header>
       <main className="page-content landing-main">
+        {logoutMessage && <div className="alert">{logoutMessage}</div>}
         <section className="panel landing-hero">
           <div className="landing-copy">
             <h1>Keep every match accountable.</h1>
@@ -71,8 +94,17 @@ export default function Landing() {
             </div>
           </div>
           <div className="landing-cta">
-            <Link className="cta-button" to="/sessions">Start a session now</Link>
-            <span className="note">Start a new session or resume a live one.</span>
+            {user ? (
+              <>
+                <Link className="cta-button" to="/sessions">Start a session now</Link>
+                <span className="note">Start a new session or resume a live one.</span>
+              </>
+            ) : (
+              <>
+                <Link className="cta-button" to="/login">Sign in</Link>
+                <Link className="cta-button secondary" to="/register">Register</Link>
+              </>
+            )}
           </div>
         </section>
       </main>

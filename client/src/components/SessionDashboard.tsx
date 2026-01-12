@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { backfillSessionSnapshots, endSession, getSessionDetail, getSummary, refreshSessionWithCooldown, startSession, stopSession } from "../api";
+import { backfillSessionSnapshots, endSession, getSessionDetail, getSummary, refreshSessionWithCooldown, shareSession, startSession, stopSession } from "../api";
 import { SessionDetail, SummaryResponse } from "../types";
 import PlayerCard from "./PlayerCard";
 import ChartsPanel from "./ChartsPanel";
@@ -9,6 +9,10 @@ import TeamSessionStats from "./TeamSessionStats";
 import CoachPanel from "./CoachPanel";
 import ThemeToggle from "./ThemeToggle";
 import BuildInfo from "./BuildInfo";
+import ImpersonationBanner from "./ImpersonationBanner";
+import SignOutButton from "./SignOutButton";
+import { useAuth } from "../auth";
+import UserBadge from "./UserBadge";
 
 export default function SessionDashboard() {
   const { id } = useParams();
@@ -22,6 +26,9 @@ export default function SessionDashboard() {
   const [refreshCooldownMs, setRefreshCooldownMs] = useState<number | null>(null);
   const [recomputing, setRecomputing] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [shareIdentity, setShareIdentity] = useState("");
+  const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const { user } = useAuth();
 
   async function loadSessionData({ withLoading = false } = {}) {
     if (!sessionId) return;
@@ -153,6 +160,18 @@ export default function SessionDashboard() {
     }
   }
 
+  async function handleShare() {
+    if (!sessionId || shareIdentity.trim().length === 0) return;
+    setShareMessage(null);
+    try {
+      await shareSession(sessionId, shareIdentity.trim());
+      setShareIdentity("");
+      setShareMessage("Session shared.");
+    } catch (err: any) {
+      setShareMessage(err?.message || "Failed to share session.");
+    }
+  }
+
   useEffect(() => {
     if (!refreshCooldownMs || refreshCooldownMs <= 0) return;
     const interval = setInterval(() => {
@@ -167,6 +186,9 @@ export default function SessionDashboard() {
   const refreshLabel = refreshCooldownMs && refreshCooldownMs > 0
     ? `Refresh (${Math.ceil(refreshCooldownMs / 1000)}s)`
     : refreshing ? "Refreshing..." : "Refresh now";
+  const canShare = Boolean(
+    user && (user.role === "admin" || (detail?.session.userId != null && detail.session.userId === user.id))
+  );
 
   if (loading) {
     return <div className="app">Loading session...</div>;
@@ -183,6 +205,7 @@ export default function SessionDashboard() {
 
   return (
     <div className="app">
+      <ImpersonationBanner />
       <header className="header">
         <div className="banner">
           <Link to="/">
@@ -205,38 +228,42 @@ export default function SessionDashboard() {
             </span>
           </div>
           <div className="banner-actions">
-            <details className="menu">
-              <summary aria-label="Session menu">
-                <span className="burger">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </span>
-              </summary>
-              <div className="menu-panel">
-                <ThemeToggle />
-                <button
-                  onClick={handleRefresh}
-                  disabled={refreshing || (refreshCooldownMs ?? 0) > 0 || detail.session.isEnded}
-                >
-                  {refreshLabel}
-                </button>
-                <button
-                  className="secondary"
-                  onClick={detail.session.isActive ? handleStop : handleStart}
-                  disabled={detail.session.isEnded}
-                >
-                  {detail.session.isActive ? "Pause session" : "Continue session"}
-                </button>
-                <button className="secondary" onClick={handleEnd} disabled={ending || detail.session.isEnded}>
-                  {ending ? "Ending..." : "End session"}
-                </button>
-                <button className="ghost" onClick={() => navigate(`/sessions/${sessionId}/advanced`)}>
-                  Advanced
-                </button>
-              </div>
-            </details>
-            <button className="ghost" onClick={() => navigate("/")}>Back</button>
+            <UserBadge />
+            <div className="banner-actions-row">
+              <details className="menu">
+                <summary aria-label="Session menu">
+                  <span className="burger">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </summary>
+                <div className="menu-panel">
+                  <ThemeToggle />
+                  <button
+                    onClick={handleRefresh}
+                    disabled={refreshing || (refreshCooldownMs ?? 0) > 0 || detail.session.isEnded}
+                  >
+                    {refreshLabel}
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={detail.session.isActive ? handleStop : handleStart}
+                    disabled={detail.session.isEnded}
+                  >
+                    {detail.session.isActive ? "Pause session" : "Continue session"}
+                  </button>
+                  <button className="secondary" onClick={handleEnd} disabled={ending || detail.session.isEnded}>
+                    {ending ? "Ending..." : "End session"}
+                  </button>
+                  <button className="ghost" onClick={() => navigate(`/sessions/${sessionId}/advanced`)}>
+                    Advanced
+                  </button>
+                  <SignOutButton />
+                </div>
+              </details>
+              <button className="ghost" onClick={() => navigate("/")}>Back</button>
+            </div>
           </div>
         </div>
       </header>
@@ -245,6 +272,31 @@ export default function SessionDashboard() {
         {error && <div className="alert error">{error}</div>}
 
         <div className="stack">
+          {canShare && (
+            <section className="panel">
+              <div className="section-header">
+                <h2>Share session</h2>
+              </div>
+              <p className="panel-help">Invite another user by username or email.</p>
+              <div className="form">
+                <label>
+                  Username or email
+                  <input
+                    type="text"
+                    value={shareIdentity}
+                    onChange={(e) => setShareIdentity(e.target.value)}
+                    placeholder="user@example.com"
+                  />
+                </label>
+                <div className="actions">
+                  <button onClick={handleShare} disabled={shareIdentity.trim().length === 0}>
+                    Share session
+                  </button>
+                  {shareMessage && <span>{shareMessage}</span>}
+                </div>
+              </div>
+            </section>
+          )}
           <section className="cards">
             {players.map((player) => (
               <PlayerCard

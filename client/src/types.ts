@@ -1,5 +1,6 @@
 export interface Session {
   id: number;
+  userId?: number | null;
   name: string;
   mode: string;
   createdAt: string;
@@ -131,6 +132,7 @@ export interface CoachReportListItem {
 
 export interface Team {
   id: number;
+  userId?: number | null;
   name: string;
   mode: string;
   createdAt: string;
@@ -197,4 +199,12 @@ export interface TeamPlayerCurrentRank {
   iconUrl: string | null;
   rankTierIndex: number | null;
   rankDivisionIndex: number | null;
+}
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  email: string;
+  role: "admin" | "user";
+  status: "pending" | "active" | "disabled";
 }

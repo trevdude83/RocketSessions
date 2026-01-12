@@ -67,6 +67,34 @@ body {
   background-attachment: fixed;
 }
 
+.impersonation-banner {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #fef9c3;
+  color: #854d0e;
+  font-weight: 700;
+  border-bottom: 1px solid #facc15;
+}
+
+.impersonation-banner .ghost {
+  background: transparent;
+  border-color: rgba(133, 77, 14, 0.35);
+  color: inherit;
+  padding: 6px 12px;
+}
+
+[data-theme="dark"] .impersonation-banner {
+  background: rgba(250, 204, 21, 0.15);
+  color: #facc15;
+  border-bottom-color: rgba(250, 204, 21, 0.4);
+}
+
 .app {
   max-width: 1200px;
   margin: 0 auto;
@@ -134,9 +162,22 @@ body {
 
 .banner-actions {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.banner-actions-row {
+  display: flex;
   gap: 12px;
   align-items: center;
-  margin-left: auto;
+}
+
+.banner-user {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .build-info {
@@ -183,6 +224,7 @@ body {
   .landing .banner-actions {
     width: 100%;
     justify-content: center;
+    align-items: center;
     margin-left: 0;
   }
 
@@ -267,20 +309,28 @@ body {
 .landing-cta {
   margin-top: 18px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 10px;
-  max-width: 360px;
+  max-width: 520px;
   align-items: center;
+  justify-content: center;
+  width: 100%;
   text-align: center;
   margin-left: auto;
   margin-right: auto;
+}
+
+.landing-cta .note {
+  flex-basis: 100%;
 }
 
 .cta-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 18px;
+  padding: 15px 22px;
+  min-width: 220px;
   border-radius: 10px;
   background: #16a34a;
   color: #ffffff;
@@ -292,6 +342,15 @@ body {
 
 .cta-button:hover {
   background: #22c55e;
+}
+
+.cta-button.secondary {
+  background: var(--color-accent);
+  box-shadow: 0 12px 24px rgba(55, 114, 255, 0.35);
+}
+
+.cta-button.secondary:hover {
+  background: #3b82f6;
 }
 
 .landing-hero-grid {

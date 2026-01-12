@@ -5,6 +5,9 @@ import { Team, TeamAggregateCoachReport, TeamCoachReportListItem, TeamPlayerCurr
 import { formatRank } from "../utils/rank";
 import ThemeToggle from "./ThemeToggle";
 import BuildInfo from "./BuildInfo";
+import ImpersonationBanner from "./ImpersonationBanner";
+import SignOutButton from "./SignOutButton";
+import UserBadge from "./UserBadge";
 import {
   CartesianGrid,
   Cell,
@@ -258,6 +261,7 @@ const chartData = useMemo(() => {
   if (!team) {
     return (
       <div className="app">
+        <ImpersonationBanner />
         <header className="header">
           <div className="banner">
             <Link to="/">
@@ -267,19 +271,23 @@ const chartData = useMemo(() => {
               <div className="banner-title">Team dashboard</div>
             </div>
             <div className="banner-actions">
-              <details className="menu">
-                <summary aria-label="Team menu">
-                  <span className="burger">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </span>
-                </summary>
-                <div className="menu-panel">
-                  <ThemeToggle />
-                </div>
-              </details>
-              <button className="ghost" onClick={() => navigate("/")}>Back</button>
+              <UserBadge />
+              <div className="banner-actions-row">
+                <details className="menu">
+                  <summary aria-label="Team menu">
+                    <span className="burger">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </span>
+                  </summary>
+                  <div className="menu-panel">
+                    <ThemeToggle />
+                    <SignOutButton />
+                  </div>
+                </details>
+                <button className="ghost" onClick={() => navigate("/")}>Back</button>
+              </div>
             </div>
           </div>
         </header>
@@ -293,6 +301,7 @@ const chartData = useMemo(() => {
 
   return (
     <div className="app">
+      <ImpersonationBanner />
       <header className="header">
         <div className="banner">
           <Link to="/">
@@ -302,19 +311,23 @@ const chartData = useMemo(() => {
             <div className="banner-title">Team dashboard</div>
           </div>
           <div className="banner-actions">
-            <details className="menu">
-              <summary aria-label="Team menu">
-                <span className="burger">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </span>
-              </summary>
-              <div className="menu-panel">
-                <ThemeToggle />
-              </div>
-            </details>
-            <button className="ghost" onClick={() => navigate("/")}>Back</button>
+            <UserBadge />
+            <div className="banner-actions-row">
+              <details className="menu">
+                <summary aria-label="Team menu">
+                  <span className="burger">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </summary>
+                <div className="menu-panel">
+                  <ThemeToggle />
+                  <SignOutButton />
+                </div>
+              </details>
+              <button className="ghost" onClick={() => navigate("/")}>Back</button>
+            </div>
           </div>
         </div>
       </header>

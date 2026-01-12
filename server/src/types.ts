@@ -2,6 +2,7 @@
 
 export interface SessionRow {
   id: number;
+  userId: number | null;
   name: string;
   mode: string;
   createdAt: string;
@@ -26,10 +27,23 @@ export interface PlayerRow {
 
 export interface TeamRow {
   id: number;
+  userId: number | null;
   name: string;
   mode: string;
   createdAt: string;
   playersJson: string;
+}
+
+export interface UserRow {
+  id: number;
+  username: string;
+  email: string;
+  passwordHash: string;
+  role: "admin" | "user";
+  status: "pending" | "active" | "disabled";
+  createdAt: string;
+  approvedAt: string | null;
+  lastLoginAt: string | null;
 }
 
 export interface SessionTeamStatsRow {

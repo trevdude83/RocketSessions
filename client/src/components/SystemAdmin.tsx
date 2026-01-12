@@ -31,6 +31,9 @@ import {
 } from "recharts";
 import ThemeToggle from "./ThemeToggle";
 import BuildInfo from "./BuildInfo";
+import ImpersonationBanner from "./ImpersonationBanner";
+import SignOutButton from "./SignOutButton";
+import UserBadge from "./UserBadge";
 
 export default function SystemAdmin() {
   const navigate = useNavigate();
@@ -308,6 +311,7 @@ export default function SystemAdmin() {
 
   return (
     <div className="app">
+      <ImpersonationBanner />
       <header className="header">
         <div className="banner">
           <Link to="/">
@@ -317,19 +321,24 @@ export default function SystemAdmin() {
             <div className="banner-title">System admin</div>
           </div>
           <div className="banner-actions">
-            <details className="menu">
-              <summary aria-label="System admin menu">
-                <span className="burger">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </span>
-              </summary>
-              <div className="menu-panel">
-                <ThemeToggle />
-              </div>
-            </details>
-            <button className="ghost" onClick={() => navigate("/")}>Back</button>
+            <UserBadge />
+            <div className="banner-actions-row">
+              <details className="menu">
+                <summary aria-label="System admin menu">
+                  <span className="burger">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </summary>
+                <div className="menu-panel">
+                  <ThemeToggle />
+                  <Link className="menu-link" to="/admin/users">User admin</Link>
+                  <SignOutButton />
+                </div>
+              </details>
+              <button className="ghost" onClick={() => navigate("/")}>Back</button>
+            </div>
           </div>
         </div>
       </header>

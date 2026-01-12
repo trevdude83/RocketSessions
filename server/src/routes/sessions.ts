@@ -1,8 +1,8 @@
-import { db, createSession, createPlayers, createTeam, deleteSession, endSession, findTeamByRoster, getBaselineSnapshot, getDbMetrics, getLatestSnapshot, getLatestSnapshotByGamertag, getPlayersBySession, getRecentSnapshots, getSession, getSessionTeamStats, getTeam, insertCoachReport, insertSessionTeamStats, getLatestCoachReport, listCoachReports, listCoachReportsByTeam, listSessions, listTeamStats, listTeams, setSetting, getSetting, updateTeamName, insertTeamCoachReport, getLatestTeamCoachReport, listTeamCoachReports, getLatestAvatarUrlByGamertag } from "../db.js";
+import { addSessionShare, db, createSession, createPlayers, createTeam, deleteSession, endSession, findTeamByRoster, getBaselineSnapshot, getDbMetrics, getLatestSnapshot, getLatestSnapshotByGamertag, getPlayersBySession, getRecentSnapshots, getSession, getSessionForUser, getSessionTeamStats, getTeam, getTeamForUser, getUserByEmail, getUserById, getUserByUsername, insertCoachReport, insertSessionTeamStats, getLatestCoachReport, listCoachReports, listCoachReportsByTeam, listSessions, listSessionsForUser, listTeamStats, listTeams, listTeamsForUser, removeSessionShare, setSetting, getSetting, updateTeamName, insertTeamCoachReport, getLatestTeamCoachReport, listTeamCoachReports, getLatestAvatarUrlByGamertag } from "../db.js";
 import { captureManualSnapshot, initializeSession, startPolling, stopPolling } from "../sessionManager.js";
 import { fetchPlayerSessions, getRateLimitInfo, getRateLimitRemainingMs, getTrnStatus, isRateLimitError } from "../trn/trnClient.js";
 import { extractMetrics } from "../trn/extractMetrics.js";
-import { DerivedMetrics, PlayerInput } from "../types.js";
+import { DerivedMetrics, PlayerInput, SessionRow } from "../types.js";
 import { buildCoachPacket } from "../coach/buildCoachPacket.js";
 import { buildTeamCoachPacket } from "../coach/buildTeamCoachPacket.js";
 import { generateCoachReport, defaultCoachPrompt } from "../coach/aiCoach.js";
@@ -10,11 +10,19 @@ import { Router } from "express";
 import fs from "fs";
 import path from "path";
 import { listPollingLogs } from "../sessionLogs.js";
+import { requireAdmin, requireAuth } from "../auth.js";
 
 const router = Router();
+router.use(requireAuth);
 
 const sessionStatsCache = new Map<string, { wins: number | null; losses: number | null; winRate: number | null }>();
 const sessionStatsCooldown = new Map<string, number>();
+
+function resolveAccess(req: { auth?: { user: { role: string }; effectiveUser: { id: number }; impersonatedBy: unknown | null } }) {
+  const impersonating = Boolean(req.auth?.impersonatedBy);
+  const isAdmin = req.auth?.user.role === "admin" && !impersonating;
+  return { userId: req.auth!.effectiveUser.id, isAdmin };
+}
 
 function parseJson<T>(value: string | undefined): T | null {
   if (!value) return null;
@@ -25,8 +33,8 @@ function parseJson<T>(value: string | undefined): T | null {
   }
 }
 
-function toSessionDetail(sessionId: number) {
-  const session = getSession(sessionId);
+function toSessionDetail(sessionId: number, sessionRow?: SessionRow) {
+  const session = sessionRow ?? getSession(sessionId);
   if (!session) return null;
   const players = getPlayersBySession(sessionId);
   const team = session.teamId ? getTeam(session.teamId) : null;
@@ -58,11 +66,13 @@ function toSessionDetail(sessionId: number) {
 }
 
 router.get("/sessions", (req, res) => {
-  res.json(listSessions());
+  const { userId, isAdmin } = resolveAccess(req);
+  res.json(listSessionsForUser(userId, isAdmin));
 });
 
 router.get("/teams", (req, res) => {
-  const teams = listTeams().map((team) => {
+  const { userId, isAdmin } = resolveAccess(req);
+  const teams = listTeamsForUser(userId, isAdmin).map((team) => {
     const players = parseJson<PlayerInput[]>(team.playersJson) || [];
     const sessionsCountRow = db
       .prepare("SELECT COUNT(1) as count FROM session_team_stats WHERE teamId = ?")
@@ -91,7 +101,8 @@ router.post("/teams", (req, res) => {
   if (!expectedPlayers || players.length !== expectedPlayers) {
     return res.status(400).json({ error: `Mode ${mode} requires ${expectedPlayers} players.` });
   }
-  const team = createTeam(name.trim(), mode, JSON.stringify(players));
+  const { userId } = resolveAccess(req);
+  const team = createTeam(userId, name.trim(), mode, JSON.stringify(players));
   res.status(201).json({ ...team, players });
 });
 
@@ -102,14 +113,16 @@ router.patch("/teams/:id", (req, res) => {
     return res.status(400).json({ error: "Name is required." });
   }
   updateTeamName(teamId, name.trim());
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   res.json({ ...team, players: parseJson<PlayerInput[]>(team.playersJson) || [] });
 });
 
 router.get("/teams/:id", (req, res) => {
   const teamId = Number(req.params.id);
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   const stats = listTeamStats(teamId).map((row) => ({
     id: row.id,
@@ -135,7 +148,8 @@ router.get("/teams/:id", (req, res) => {
 
 router.get("/teams/:id/reports", (req, res) => {
   const teamId = Number(req.params.id);
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   const reports = listCoachReportsByTeam(teamId);
   res.json(
@@ -153,7 +167,8 @@ router.get("/teams/:id/reports", (req, res) => {
 
 router.get("/teams/:id/peaks", (req, res) => {
   const teamId = Number(req.params.id);
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   const players = parseJson<PlayerInput[]>(team.playersJson) || [];
   const payload = players.map((player) => {
@@ -172,7 +187,8 @@ router.get("/teams/:id/peaks", (req, res) => {
 
 router.get("/teams/:id/current-ranks", (req, res) => {
   const teamId = Number(req.params.id);
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   const players = parseJson<PlayerInput[]>(team.playersJson) || [];
   const playlistId = getFocusPlaylistId(team.mode);
@@ -210,7 +226,9 @@ router.get("/teams/:id/current-ranks", (req, res) => {
 
 router.get("/sessions/:id", (req, res) => {
   const sessionId = Number(req.params.id);
-  const detail = toSessionDetail(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
+  const detail = session ? toSessionDetail(sessionId, session) : null;
   if (!detail) {
     return res.status(404).json({ error: "Session not found" });
   }
@@ -264,14 +282,15 @@ router.post("/sessions", async (req, res) => {
   }
 
   if (!resolvedTeamId) {
-    const matchedTeam = findTeamByRoster(resolvedMode, resolvedPlayers);
+    const { userId } = resolveAccess(req);
+    const matchedTeam = findTeamByRoster(userId, resolvedMode, resolvedPlayers);
     if (matchedTeam) {
       resolvedTeamId = matchedTeam.id;
     } else if (saveTeam || teamName) {
       if (!teamName || teamName.trim().length === 0) {
         return res.status(400).json({ error: "Team name is required to save a team." });
       }
-      const team = createTeam(teamName.trim(), resolvedMode, JSON.stringify(resolvedPlayers));
+      const team = createTeam(userId, teamName.trim(), resolvedMode, JSON.stringify(resolvedPlayers));
       resolvedTeamId = team.id;
     }
   }
@@ -280,19 +299,55 @@ router.post("/sessions", async (req, res) => {
     ? Number(pollingIntervalSeconds)
     : 180;
 
-  const session = createSession(name, resolvedMode, interval, resolvedTeamId, Boolean(includeCoachOnEnd));
+  const { userId } = resolveAccess(req);
+  const session = createSession(userId, name, resolvedMode, interval, resolvedTeamId, Boolean(includeCoachOnEnd));
   createPlayers(session.id, resolvedPlayers);
 
   await initializeSession(session.id);
   startPolling(session.id, interval);
 
-  const detail = toSessionDetail(session.id);
+  const detail = toSessionDetail(session.id, session);
   res.status(201).json(detail);
+});
+
+router.post("/sessions/:id/share", (req, res) => {
+  const sessionId = Number(req.params.id);
+  const { identity } = req.body as { identity?: string };
+  if (!sessionId || !identity) {
+    return res.status(400).json({ error: "Provide sessionId and a username or email." });
+  }
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSession(sessionId);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  if (!isAdmin && session.userId !== userId) {
+    return res.status(403).json({ error: "Not authorized to share this session." });
+  }
+  const target = getUserByUsername(identity) || getUserByEmail(identity);
+  if (!target) return res.status(404).json({ error: "User not found" });
+  addSessionShare(sessionId, target.id, req.auth?.user.id ?? null);
+  res.json({ ok: true, userId: target.id });
+});
+
+router.delete("/sessions/:id/share/:userId", (req, res) => {
+  const sessionId = Number(req.params.id);
+  const targetUserId = Number(req.params.userId);
+  if (!sessionId || !targetUserId) {
+    return res.status(400).json({ error: "Missing sessionId or userId." });
+  }
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSession(sessionId);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  if (!isAdmin && session.userId !== userId) {
+    return res.status(403).json({ error: "Not authorized to update sharing." });
+  }
+  removeSessionShare(sessionId, targetUserId);
+  res.json({ ok: true });
 });
 
 router.post("/sessions/:id/stop", (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
   if (session.isEnded) return res.status(400).json({ error: "Session has ended" });
   stopPolling(sessionId);
@@ -301,7 +356,8 @@ router.post("/sessions/:id/stop", (req, res) => {
 
 router.delete("/sessions/:id", (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
   stopPolling(sessionId);
   deleteSession(sessionId);
@@ -310,7 +366,8 @@ router.delete("/sessions/:id", (req, res) => {
 
 router.post("/sessions/:id/start", async (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
   if (session.isEnded) return res.status(400).json({ error: "Session has ended" });
   startPolling(sessionId, session.pollingIntervalSeconds);
@@ -319,7 +376,8 @@ router.post("/sessions/:id/start", async (req, res) => {
 
 router.post("/sessions/:id/end", async (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
   if (session.isEnded) return res.status(400).json({ error: "Session already ended" });
 
@@ -377,13 +435,14 @@ router.post("/sessions/:id/end", async (req, res) => {
     );
   }
 
-  const detail = toSessionDetail(sessionId);
+  const detail = toSessionDetail(sessionId, session);
   res.json({ session: detail?.session, teamStatsWritten, coachReportId });
 });
 
 router.post("/sessions/:id/refresh", async (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
   const remaining = getRateLimitRemainingMs();
   if (remaining > 0) {
@@ -397,7 +456,7 @@ router.post("/sessions/:id/refresh", async (req, res) => {
     }
     throw error;
   }
-  const detail = toSessionDetail(sessionId);
+  const detail = toSessionDetail(sessionId, session);
   res.json(detail);
 });
 
@@ -760,7 +819,8 @@ async function computeSessionStats(
 
 router.get("/sessions/:id/summary", async (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   const players = getPlayersBySession(sessionId);
@@ -904,6 +964,9 @@ router.get("/sessions/:id/timeseries", (req, res) => {
   if (!sessionId || !playerId || !metric) {
     return res.status(400).json({ error: "Missing playerId or metric" });
   }
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
+  if (!session) return res.status(404).json({ error: "Session not found" });
 
   const snapshots = db
     .prepare(
@@ -990,6 +1053,9 @@ router.get("/sessions/:id/timeseries", (req, res) => {
 router.get("/sessions/:id/snapshots", (req, res) => {
   const sessionId = Number(req.params.id);
   const limit = Number(req.query.limit || 20);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
+  if (!session) return res.status(404).json({ error: "Session not found" });
   const rows = getRecentSnapshots(sessionId, limit);
   const payload = rows.map((row) => ({
     id: row.id,
@@ -1002,7 +1068,8 @@ router.get("/sessions/:id/snapshots", (req, res) => {
 
 router.post("/sessions/:id/snapshots/backfill", (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   const rows = db
@@ -1052,6 +1119,9 @@ router.post("/snapshots/:id/backfill", (req, res) => {
 router.get("/sessions/:id/snapshots/raw", (req, res) => {
   const sessionId = Number(req.params.id);
   const limit = Number(req.query.limit || 50);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
+  if (!session) return res.status(404).json({ error: "Session not found" });
   const rows = db
     .prepare(
       "SELECT id, playerId, capturedAt, matchIndex, rawJson, derivedJson FROM snapshots WHERE sessionId = ? ORDER BY capturedAt DESC LIMIT ?"
@@ -1077,7 +1147,7 @@ router.get("/sessions/:id/snapshots/raw", (req, res) => {
   res.json(payload);
 });
 
-router.get("/trn/status", async (req, res) => {
+router.get("/trn/status", requireAdmin, async (req, res) => {
   const platform = (req.query.platform as string) || "xbl";
   const gamertag = req.query.gamertag as string | undefined;
   const force = req.query.force === "1" || req.query.force === "true";
@@ -1088,7 +1158,7 @@ router.get("/trn/status", async (req, res) => {
   res.json({ ...result, rateLimit: getRateLimitInfo() });
 });
 
-router.get("/metrics/db", (req, res) => {
+router.get("/metrics/db", requireAdmin, (req, res) => {
   const sessionId = req.query.sessionId ? Number(req.query.sessionId) : null;
   const limit = Number(req.query.limit || 100);
   const rows = getDbMetrics(Number.isFinite(sessionId as number) ? (sessionId as number) : null, limit);
@@ -1129,7 +1199,7 @@ function getSettingsPaths() {
   };
 }
 
-router.post("/settings/api-key", (req, res) => {
+router.post("/settings/api-key", requireAdmin, (req, res) => {
   const { apiKey } = req.body as { apiKey?: string };
   if (!apiKey || typeof apiKey !== "string") {
     return res.status(400).json({ error: "Missing apiKey" });
@@ -1155,7 +1225,7 @@ router.post("/settings/api-key", (req, res) => {
   res.json({ ok: true, written });
 });
 
-router.get("/settings/api-key", (req, res) => {
+router.get("/settings/api-key", requireAdmin, (req, res) => {
   let value = process.env.TRN_API_KEY || getSetting("TRN_API_KEY");
   if (!value) {
     const settingsPaths = getSettingsPaths();
@@ -1177,7 +1247,7 @@ router.get("/settings/api-key", (req, res) => {
   res.json({ configured: Boolean(value) });
 });
 
-router.post("/settings/openai-key", (req, res) => {
+router.post("/settings/openai-key", requireAdmin, (req, res) => {
   const { apiKey, model } = req.body as { apiKey?: string; model?: string };
   if (!apiKey || typeof apiKey !== "string") {
     return res.status(400).json({ error: "Missing apiKey" });
@@ -1210,7 +1280,7 @@ router.post("/settings/openai-key", (req, res) => {
   res.json({ ok: true, written });
 });
 
-router.get("/settings/openai-key", (req, res) => {
+router.get("/settings/openai-key", requireAdmin, (req, res) => {
   let value = process.env.OPENAI_API_KEY || getSetting("OPENAI_API_KEY");
   let model = process.env.OPENAI_MODEL || getSetting("OPENAI_MODEL") || null;
   if (!value) {
@@ -1237,7 +1307,7 @@ router.get("/settings/openai-key", (req, res) => {
   res.json({ configured: Boolean(value), model });
 });
 
-router.post("/settings/coach-prompt", (req, res) => {
+router.post("/settings/coach-prompt", requireAdmin, (req, res) => {
   const { prompt } = req.body as { prompt?: string };
   if (typeof prompt !== "string") {
     return res.status(400).json({ error: "Missing prompt" });
@@ -1257,7 +1327,7 @@ router.post("/settings/coach-prompt", (req, res) => {
   res.json({ ok: true, written });
 });
 
-router.post("/settings/team-coach-prompt", (req, res) => {
+router.post("/settings/team-coach-prompt", requireAdmin, (req, res) => {
   const { prompt } = req.body as { prompt?: string };
   if (typeof prompt !== "string") {
     return res.status(400).json({ error: "Missing prompt" });
@@ -1277,11 +1347,11 @@ router.post("/settings/team-coach-prompt", (req, res) => {
   res.json({ ok: true, written });
 });
 
-router.get("/settings/team-coach-prompt/default", (req, res) => {
+router.get("/settings/team-coach-prompt/default", requireAdmin, (req, res) => {
   res.json({ prompt: defaultCoachPrompt });
 });
 
-router.get("/settings/team-coach-prompt", (req, res) => {
+router.get("/settings/team-coach-prompt", requireAdmin, (req, res) => {
   let prompt = getSetting("TEAM_COACH_PROMPT");
   if (!prompt) {
     const settingsPaths = getSettingsPaths();
@@ -1298,11 +1368,11 @@ router.get("/settings/team-coach-prompt", (req, res) => {
   res.json({ prompt: prompt || null });
 });
 
-router.get("/settings/coach-prompt/default", (req, res) => {
+router.get("/settings/coach-prompt/default", requireAdmin, (req, res) => {
   res.json({ prompt: defaultCoachPrompt });
 });
 
-router.get("/settings/coach-prompt", (req, res) => {
+router.get("/settings/coach-prompt", requireAdmin, (req, res) => {
   let prompt = getSetting("COACH_PROMPT");
   if (!prompt) {
     const settingsPaths = getSettingsPaths();
@@ -1319,7 +1389,7 @@ router.get("/settings/coach-prompt", (req, res) => {
   res.json({ prompt: prompt || null });
 });
 
-router.get("/settings/debug", (req, res) => {
+router.get("/settings/debug", requireAdmin, (req, res) => {
   const rows = db.prepare("SELECT key FROM app_settings").all() as { key: string }[];
   const settingsPaths = getSettingsPaths();
   res.json({
@@ -1339,6 +1409,9 @@ router.get("/sessions/:id/raw", (req, res) => {
   if (!sessionId || !playerId) {
     return res.status(400).json({ error: "Missing sessionId or playerId" });
   }
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
+  if (!session) return res.status(404).json({ error: "Session not found" });
   const latest = db
     .prepare("SELECT rawJson, derivedJson FROM snapshots WHERE sessionId = ? AND playerId = ? ORDER BY capturedAt DESC LIMIT 1")
     .get(sessionId, playerId) as { rawJson: string; derivedJson: string } | undefined;
@@ -1349,14 +1422,15 @@ router.get("/sessions/:id/raw", (req, res) => {
   });
 });
 
-router.get("/logs/polling", (req, res) => {
+router.get("/logs/polling", requireAdmin, (req, res) => {
   const limit = Number(req.query.limit || 200);
   res.json(listPollingLogs(Number.isFinite(limit) ? limit : 200));
 });
 
 router.post("/sessions/:id/coach", async (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   const focusPlaylistId = Number.isFinite(Number(req.body?.focusPlaylistId))
@@ -1377,7 +1451,8 @@ router.post("/sessions/:id/coach", async (req, res) => {
 
 router.get("/sessions/:id/coach/packet", (req, res) => {
   const sessionId = Number(req.params.id);
-  const session = getSession(sessionId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
   const focusPlaylistId = Number.isFinite(Number(req.query.focusPlaylistId))
     ? Number(req.query.focusPlaylistId)
@@ -1393,6 +1468,9 @@ router.get("/sessions/:id/coach/packet", (req, res) => {
 
 router.get("/sessions/:id/coach/latest", (req, res) => {
   const sessionId = Number(req.params.id);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
+  if (!session) return res.status(404).json({ error: "Session not found" });
   const focusPlaylistId = Number.isFinite(Number(req.query.focusPlaylistId))
     ? Number(req.query.focusPlaylistId)
     : 11;
@@ -1409,6 +1487,9 @@ router.get("/sessions/:id/coach/latest", (req, res) => {
 
 router.get("/sessions/:id/coach/reports", (req, res) => {
   const sessionId = Number(req.params.id);
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
+  if (!session) return res.status(404).json({ error: "Session not found" });
   const focusPlaylistId = Number.isFinite(Number(req.query.focusPlaylistId))
     ? Number(req.query.focusPlaylistId)
     : undefined;
@@ -1426,7 +1507,8 @@ router.get("/sessions/:id/coach/reports", (req, res) => {
 
 router.get("/teams/:id/coach/packet", (req, res) => {
   const teamId = Number(req.params.id);
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   try {
     const packet = buildTeamCoachPacket(teamId);
@@ -1439,7 +1521,8 @@ router.get("/teams/:id/coach/packet", (req, res) => {
 
 router.post("/teams/:id/coach", async (req, res) => {
   const teamId = Number(req.params.id);
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   try {
     const packet = buildTeamCoachPacket(teamId);
@@ -1455,7 +1538,8 @@ router.post("/teams/:id/coach", async (req, res) => {
 
 router.get("/teams/:id/coach/latest", (req, res) => {
   const teamId = Number(req.params.id);
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   const report = getLatestTeamCoachReport(teamId);
   if (!report) return res.status(404).json({ error: "No team coach report found" });
@@ -1469,7 +1553,8 @@ router.get("/teams/:id/coach/latest", (req, res) => {
 
 router.get("/teams/:id/coach/reports", (req, res) => {
   const teamId = Number(req.params.id);
-  const team = getTeam(teamId);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   const reports = listTeamCoachReports(teamId);
   res.json(
@@ -1483,7 +1568,8 @@ router.get("/teams/:id/coach/reports", (req, res) => {
 });
 
 router.post("/demo", async (req, res) => {
-  const session = createSession("Demo Session", "2v2", 60, null, false);
+  const { userId } = resolveAccess(req);
+  const session = createSession(userId, "Demo Session", "2v2", 60, null, false);
   createPlayers(session.id, [
     { platform: "xbl", gamertag: "DemoPlayerOne" },
     { platform: "xbl", gamertag: "DemoPlayerTwo" }

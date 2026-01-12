@@ -35,6 +35,7 @@ db.pragma("journal_mode = WAL");
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER,
     name TEXT NOT NULL,
     mode TEXT NOT NULL DEFAULT '2v2',
     createdAt TEXT NOT NULL,
@@ -49,6 +50,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER,
     name TEXT NOT NULL,
     mode TEXT NOT NULL,
     createdAt TEXT NOT NULL,
@@ -120,10 +122,46 @@ db.exec(`
     recordsJson TEXT NOT NULL,
     coachReportId INTEGER
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL UNIQUE,
+    passwordHash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    status TEXT NOT NULL DEFAULT 'pending',
+    createdAt TEXT NOT NULL,
+    approvedAt TEXT,
+    lastLoginAt TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS auth_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    impersonatedUserId INTEGER,
+    impersonatedByUserId INTEGER,
+    createdAt TEXT NOT NULL,
+    expiresAt TEXT NOT NULL,
+    ip TEXT,
+    userAgent TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS session_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sessionId INTEGER NOT NULL,
+    userId INTEGER NOT NULL,
+    sharedByUserId INTEGER,
+    createdAt TEXT NOT NULL
+  );
 `);
 
 try {
   db.exec("ALTER TABLE sessions ADD COLUMN matchIndex INTEGER NOT NULL DEFAULT 0");
+} catch {}
+
+try {
+  db.exec("ALTER TABLE sessions ADD COLUMN userId INTEGER");
 } catch {}
 
 try {
@@ -204,6 +242,9 @@ try {
   db.exec("ALTER TABLE coach_reports ADD COLUMN teamId INTEGER");
 } catch {}
 try {
+  db.exec("ALTER TABLE teams ADD COLUMN userId INTEGER");
+} catch {}
+try {
   db.exec("ALTER TABLE team_coach_reports ADD COLUMN teamId INTEGER");
 } catch {}
 try {
@@ -238,7 +279,15 @@ try {
   db.exec("ALTER TABLE session_team_stats ADD COLUMN coachReportId INTEGER");
 } catch {}
 
+try {
+  db.exec("ALTER TABLE auth_sessions ADD COLUMN impersonatedUserId INTEGER");
+} catch {}
+try {
+  db.exec("ALTER TABLE auth_sessions ADD COLUMN impersonatedByUserId INTEGER");
+} catch {}
+
 export function createSession(
+  userId: number | null,
   name: string,
   mode: string,
   pollingIntervalSeconds: number,
@@ -247,11 +296,12 @@ export function createSession(
 ): SessionRow {
   const createdAt = new Date().toISOString();
   const stmt = db.prepare(
-    "INSERT INTO sessions (name, mode, createdAt, pollingIntervalSeconds, isActive, matchIndex, teamId, includeCoachOnEnd, isEnded) VALUES (?, ?, ?, ?, 1, 0, ?, ?, 0)"
+    "INSERT INTO sessions (userId, name, mode, createdAt, pollingIntervalSeconds, isActive, matchIndex, teamId, includeCoachOnEnd, isEnded) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, 0)"
   );
-  const result = stmt.run(name, mode, createdAt, pollingIntervalSeconds, teamId, includeCoachOnEnd ? 1 : 0);
+  const result = stmt.run(userId, name, mode, createdAt, pollingIntervalSeconds, teamId, includeCoachOnEnd ? 1 : 0);
   return {
     id: Number(result.lastInsertRowid),
+    userId,
     name,
     mode,
     createdAt,
@@ -287,18 +337,45 @@ export function getSession(sessionId: number): SessionRow | undefined {
   return db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId) as SessionRow | undefined;
 }
 
+export function listSessionsForUser(userId: number, isAdmin: boolean): (SessionRow & { teamName?: string | null })[] {
+  if (isAdmin) return listSessions();
+  return db
+    .prepare(
+      `SELECT DISTINCT sessions.*, teams.name as teamName
+       FROM sessions
+       LEFT JOIN teams ON teams.id = sessions.teamId
+       LEFT JOIN session_shares ON session_shares.sessionId = sessions.id
+       WHERE sessions.userId = ? OR session_shares.userId = ?
+       ORDER BY sessions.createdAt DESC`
+    )
+    .all(userId, userId) as (SessionRow & { teamName?: string | null })[];
+}
+
+export function getSessionForUser(sessionId: number, userId: number, isAdmin: boolean): SessionRow | undefined {
+  if (isAdmin) return getSession(sessionId);
+  return db
+    .prepare(
+      `SELECT DISTINCT sessions.*
+       FROM sessions
+       LEFT JOIN session_shares ON session_shares.sessionId = sessions.id
+       WHERE sessions.id = ? AND (sessions.userId = ? OR session_shares.userId = ?)`
+    )
+    .get(sessionId, userId, userId) as SessionRow | undefined;
+}
+
 export function endSession(sessionId: number): void {
   db.prepare("UPDATE sessions SET isActive = 0, isEnded = 1, endedAt = ? WHERE id = ?")
     .run(new Date().toISOString(), sessionId);
 }
 
-export function createTeam(name: string, mode: string, playersJson: string): TeamRow {
+export function createTeam(userId: number | null, name: string, mode: string, playersJson: string): TeamRow {
   const createdAt = new Date().toISOString();
   const result = db
-    .prepare("INSERT INTO teams (name, mode, createdAt, playersJson) VALUES (?, ?, ?, ?)")
-    .run(name, mode, createdAt, playersJson);
+    .prepare("INSERT INTO teams (userId, name, mode, createdAt, playersJson) VALUES (?, ?, ?, ?, ?)")
+    .run(userId, name, mode, createdAt, playersJson);
   return {
     id: Number(result.lastInsertRowid),
+    userId,
     name,
     mode,
     createdAt,
@@ -308,6 +385,11 @@ export function createTeam(name: string, mode: string, playersJson: string): Tea
 
 export function listTeams(): TeamRow[] {
   return db.prepare("SELECT * FROM teams ORDER BY createdAt DESC").all() as TeamRow[];
+}
+
+export function listTeamsForUser(userId: number, isAdmin: boolean): TeamRow[] {
+  if (isAdmin) return listTeams();
+  return db.prepare("SELECT * FROM teams WHERE userId = ? ORDER BY createdAt DESC").all(userId) as TeamRow[];
 }
 
 function rosterKey(players: PlayerInput[]): string {
@@ -326,9 +408,10 @@ function parseTeamPlayers(value: string): PlayerInput[] | null {
   }
 }
 
-export function findTeamByRoster(mode: string, players: PlayerInput[]): TeamRow | undefined {
+export function findTeamByRoster(userId: number | null, mode: string, players: PlayerInput[]): TeamRow | undefined {
   const targetKey = rosterKey(players);
   return listTeams().find((team) => {
+    if (userId !== null && team.userId !== userId) return false;
     if (team.mode !== mode) return false;
     const teamPlayers = parseTeamPlayers(team.playersJson);
     if (!teamPlayers) return false;
@@ -338,6 +421,11 @@ export function findTeamByRoster(mode: string, players: PlayerInput[]): TeamRow 
 
 export function getTeam(teamId: number): TeamRow | undefined {
   return db.prepare("SELECT * FROM teams WHERE id = ?").get(teamId) as TeamRow | undefined;
+}
+
+export function getTeamForUser(teamId: number, userId: number, isAdmin: boolean): TeamRow | undefined {
+  if (isAdmin) return getTeam(teamId);
+  return db.prepare("SELECT * FROM teams WHERE id = ? AND userId = ?").get(teamId, userId) as TeamRow | undefined;
 }
 
 export function updateTeamName(teamId: number, name: string): void {
@@ -444,12 +532,14 @@ export function deleteSession(sessionId: number): void {
   const deleteSessionRow = db.prepare("DELETE FROM sessions WHERE id = ?");
   const deleteTeamStats = db.prepare("DELETE FROM session_team_stats WHERE sessionId = ?");
   const deleteCoachReports = db.prepare("DELETE FROM coach_reports WHERE sessionId = ?");
+  const deleteSessionShares = db.prepare("DELETE FROM session_shares WHERE sessionId = ?");
 
   const run = db.transaction(() => {
     deleteSnapshots.run(sessionId);
     deletePlayers.run(sessionId);
     deleteTeamStats.run(sessionId);
     deleteCoachReports.run(sessionId);
+    deleteSessionShares.run(sessionId);
     deleteSessionRow.run(sessionId);
   });
 
@@ -616,4 +706,157 @@ export function getLatestAvatarUrlByGamertag(gamertag: string): string | null {
   } catch {
     return null;
   }
+}
+
+export function createUser(
+  username: string,
+  email: string,
+  passwordHash: string,
+  role: "admin" | "user",
+  status: "pending" | "active" | "disabled"
+): { id: number; username: string; email: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null } {
+  const createdAt = new Date().toISOString();
+  const approvedAt = status === "active" ? createdAt : null;
+  const result = db
+    .prepare("INSERT INTO users (username, email, passwordHash, role, status, createdAt, approvedAt) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(username, email, passwordHash, role, status, createdAt, approvedAt);
+  return {
+    id: Number(result.lastInsertRowid),
+    username,
+    email,
+    role,
+    status,
+    createdAt,
+    approvedAt,
+    lastLoginAt: null
+  };
+}
+
+export function listUsers(): { id: number; username: string; email: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null }[] {
+  return db
+    .prepare("SELECT id, username, email, role, status, createdAt, approvedAt, lastLoginAt FROM users ORDER BY createdAt DESC")
+    .all() as { id: number; username: string; email: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null }[];
+}
+
+export function countUsers(): number {
+  const row = db.prepare("SELECT COUNT(1) as count FROM users").get() as { count: number };
+  return row?.count ?? 0;
+}
+
+export function getUserById(userId: number): { id: number; username: string; email: string; passwordHash: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null } | undefined {
+  return db
+    .prepare("SELECT * FROM users WHERE id = ?")
+    .get(userId) as { id: number; username: string; email: string; passwordHash: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null } | undefined;
+}
+
+export function getUserByUsername(username: string): { id: number; username: string; email: string; passwordHash: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null } | undefined {
+  return db
+    .prepare("SELECT * FROM users WHERE LOWER(username) = LOWER(?)")
+    .get(username) as { id: number; username: string; email: string; passwordHash: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null } | undefined;
+}
+
+export function getUserByEmail(email: string): { id: number; username: string; email: string; passwordHash: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null } | undefined {
+  return db
+    .prepare("SELECT * FROM users WHERE LOWER(email) = LOWER(?)")
+    .get(email) as { id: number; username: string; email: string; passwordHash: string; role: string; status: string; createdAt: string; approvedAt: string | null; lastLoginAt: string | null } | undefined;
+}
+
+export function updateUserStatus(userId: number, status: "pending" | "active" | "disabled"): void {
+  const approvedAt = status === "active" ? new Date().toISOString() : null;
+  db.prepare("UPDATE users SET status = ?, approvedAt = ? WHERE id = ?")
+    .run(status, approvedAt, userId);
+}
+
+export function updateUserRole(userId: number, role: "admin" | "user"): void {
+  db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, userId);
+}
+
+export function updateUserProfile(userId: number, username: string, email: string): void {
+  db.prepare("UPDATE users SET username = ?, email = ? WHERE id = ?").run(username, email, userId);
+}
+
+export function updateUserPassword(userId: number, passwordHash: string): void {
+  db.prepare("UPDATE users SET passwordHash = ? WHERE id = ?").run(passwordHash, userId);
+}
+
+export function updateUserLastLogin(userId: number): void {
+  db.prepare("UPDATE users SET lastLoginAt = ? WHERE id = ?").run(new Date().toISOString(), userId);
+}
+
+export function deleteUser(userId: number): void {
+  const sessionIds = db.prepare("SELECT id FROM sessions WHERE userId = ?").all(userId) as { id: number }[];
+  const deleteSnapshots = db.prepare("DELETE FROM snapshots WHERE sessionId = ?");
+  const deletePlayers = db.prepare("DELETE FROM players WHERE sessionId = ?");
+  const deleteTeamStats = db.prepare("DELETE FROM session_team_stats WHERE sessionId = ?");
+  const deleteCoachReports = db.prepare("DELETE FROM coach_reports WHERE sessionId = ?");
+  const deleteSessionSharesBySession = db.prepare("DELETE FROM session_shares WHERE sessionId = ?");
+  const deleteSessions = db.prepare("DELETE FROM sessions WHERE id = ?");
+  const deleteTeams = db.prepare("DELETE FROM teams WHERE userId = ?");
+  const deleteSessionSharesByUser = db.prepare("DELETE FROM session_shares WHERE userId = ? OR sharedByUserId = ?");
+  const deleteAuthSessions = db.prepare("DELETE FROM auth_sessions WHERE userId = ? OR impersonatedUserId = ? OR impersonatedByUserId = ?");
+  const deleteUserRow = db.prepare("DELETE FROM users WHERE id = ?");
+
+  const run = db.transaction(() => {
+    sessionIds.forEach((row) => {
+      deleteSnapshots.run(row.id);
+      deletePlayers.run(row.id);
+      deleteTeamStats.run(row.id);
+      deleteCoachReports.run(row.id);
+      deleteSessionSharesBySession.run(row.id);
+      deleteSessions.run(row.id);
+    });
+    deleteTeams.run(userId);
+    deleteSessionSharesByUser.run(userId, userId);
+    deleteAuthSessions.run(userId, userId, userId);
+    deleteUserRow.run(userId);
+  });
+
+  run();
+}
+
+export function createAuthSession(userId: number, token: string, expiresAt: string, ip: string | null, userAgent: string | null): void {
+  const createdAt = new Date().toISOString();
+  db.prepare("INSERT INTO auth_sessions (userId, token, createdAt, expiresAt, ip, userAgent) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(userId, token, createdAt, expiresAt, ip, userAgent);
+}
+
+export function getAuthSessionByToken(token: string): { id: number; userId: number; impersonatedUserId: number | null; impersonatedByUserId: number | null; createdAt: string; expiresAt: string } | undefined {
+  return db
+    .prepare("SELECT id, userId, impersonatedUserId, impersonatedByUserId, createdAt, expiresAt FROM auth_sessions WHERE token = ?")
+    .get(token) as { id: number; userId: number; impersonatedUserId: number | null; impersonatedByUserId: number | null; createdAt: string; expiresAt: string } | undefined;
+}
+
+export function deleteAuthSession(token: string): void {
+  db.prepare("DELETE FROM auth_sessions WHERE token = ?").run(token);
+}
+
+export function clearAuthSessionsForUser(userId: number): void {
+  db.prepare("DELETE FROM auth_sessions WHERE userId = ? OR impersonatedUserId = ? OR impersonatedByUserId = ?")
+    .run(userId, userId, userId);
+}
+
+export function setAuthSessionImpersonation(sessionId: number, impersonatedUserId: number, impersonatedByUserId: number): void {
+  db.prepare("UPDATE auth_sessions SET impersonatedUserId = ?, impersonatedByUserId = ? WHERE id = ?")
+    .run(impersonatedUserId, impersonatedByUserId, sessionId);
+}
+
+export function clearAuthSessionImpersonation(sessionId: number): void {
+  db.prepare("UPDATE auth_sessions SET impersonatedUserId = NULL, impersonatedByUserId = NULL WHERE id = ?")
+    .run(sessionId);
+}
+
+export function addSessionShare(sessionId: number, userId: number, sharedByUserId: number | null): void {
+  const createdAt = new Date().toISOString();
+  db.prepare("INSERT INTO session_shares (sessionId, userId, sharedByUserId, createdAt) VALUES (?, ?, ?, ?)")
+    .run(sessionId, userId, sharedByUserId, createdAt);
+}
+
+export function removeSessionShare(sessionId: number, userId: number): void {
+  db.prepare("DELETE FROM session_shares WHERE sessionId = ? AND userId = ?").run(sessionId, userId);
+}
+
+export function listSessionShares(sessionId: number): { id: number; sessionId: number; userId: number; sharedByUserId: number | null; createdAt: string }[] {
+  return db
+    .prepare("SELECT id, sessionId, userId, sharedByUserId, createdAt FROM session_shares WHERE sessionId = ? ORDER BY createdAt DESC")
+    .all(sessionId) as { id: number; sessionId: number; userId: number; sharedByUserId: number | null; createdAt: string }[];
 }

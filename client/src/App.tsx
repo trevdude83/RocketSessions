@@ -1,30 +1,70 @@
-import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useEffect, useState } from "react";
 import SessionForm from "./components/SessionForm";
 import SessionDashboard from "./components/SessionDashboard";
 import AdvancedSession from "./components/AdvancedSession";
 import SystemAdmin from "./components/SystemAdmin";
 import Landing from "./components/Landing";
+import Login from "./components/Login";
+import Register from "./components/Register";
+import Pending from "./components/Pending";
+import UserAdmin from "./components/UserAdmin";
 import { deleteSession, listSessions, listTeams } from "./api";
 import { Session, Team } from "./types";
 import TeamHistory from "./components/TeamHistory";
 import TeamDashboard from "./components/TeamDashboard";
-import ThemeToggle from "./components/ThemeToggle";
 import BuildInfo from "./components/BuildInfo";
+import { AuthProvider, useAuth } from "./auth";
+import ImpersonationBanner from "./components/ImpersonationBanner";
+import AuthMenuItems from "./components/AuthMenuItems";
+import UserBadge from "./components/UserBadge";
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/sessions" element={<SessionManager />} />
-        <Route path="/sessions/:id" element={<SessionDashboard />} />
-        <Route path="/sessions/:id/advanced" element={<AdvancedSession />} />
-        <Route path="/teams/:id" element={<TeamDashboard />} />
-        <Route path="/admin" element={<SystemAdmin />} />
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/pending" element={<Pending />} />
+          <Route element={<RequireAuth />}>
+            <Route path="/sessions" element={<SessionManager />} />
+            <Route path="/sessions/:id" element={<SessionDashboard />} />
+            <Route path="/sessions/:id/advanced" element={<AdvancedSession />} />
+            <Route path="/teams/:id" element={<TeamDashboard />} />
+            <Route element={<RequireAdmin />}>
+              <Route path="/admin" element={<SystemAdmin />} />
+              <Route path="/admin/users" element={<UserAdmin />} />
+            </Route>
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
+}
+
+function RequireAuth() {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return <div className="app">Loading...</div>;
+  }
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  if (user.status === "pending") {
+    return <Navigate to="/pending" replace />;
+  }
+  return <Outlet />;
+}
+
+function RequireAdmin() {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "admin") {
+    return <Navigate to="/" replace />;
+  }
+  return <Outlet />;
 }
 
 function SessionManager() {
@@ -83,6 +123,7 @@ function SessionManager() {
 
   return (
     <div className="app">
+      <ImpersonationBanner />
       <header className="header">
         <div className="banner">
           <Link to="/">
@@ -92,19 +133,21 @@ function SessionManager() {
             <div className="banner-title">Session Manager</div>
           </div>
           <div className="banner-actions">
-            <details className="menu">
-              <summary aria-label="System menu">
-                <span className="burger">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </span>
-              </summary>
-              <div className="menu-panel">
-                <ThemeToggle />
-                <Link className="menu-link" to="/admin">System admin</Link>
-              </div>
-            </details>
+            <UserBadge />
+            <div className="banner-actions-row">
+              <details className="menu">
+                <summary aria-label="System menu">
+                  <span className="burger">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </summary>
+                <div className="menu-panel">
+                  <AuthMenuItems showAdminLink />
+                </div>
+              </details>
+            </div>
           </div>
         </div>
       </header>

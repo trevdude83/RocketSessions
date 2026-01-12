@@ -4,6 +4,9 @@ import { getRawSnapshots, getSessionDetail, backfillSessionSnapshots, backfillSn
 import { Player, SessionDetail } from "../types";
 import ThemeToggle from "./ThemeToggle";
 import BuildInfo from "./BuildInfo";
+import ImpersonationBanner from "./ImpersonationBanner";
+import SignOutButton from "./SignOutButton";
+import UserBadge from "./UserBadge";
 
 interface RawSnapshot {
   id: number;
@@ -86,6 +89,7 @@ export default function AdvancedSession() {
 
   return (
     <div className="app">
+      <ImpersonationBanner />
       <header className="header">
         <div className="banner">
           <Link to="/">
@@ -95,19 +99,23 @@ export default function AdvancedSession() {
             <div className="banner-title">Advanced Settings</div>
           </div>
           <div className="banner-actions">
-            <details className="menu">
-              <summary aria-label="Advanced menu">
-                <span className="burger">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </span>
-              </summary>
-              <div className="menu-panel">
-                <ThemeToggle />
-              </div>
-            </details>
-            <button className="ghost" onClick={() => navigate(`/sessions/${sessionId}`)}>Back</button>
+            <UserBadge />
+            <div className="banner-actions-row">
+              <details className="menu">
+                <summary aria-label="Advanced menu">
+                  <span className="burger">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </summary>
+                <div className="menu-panel">
+                  <ThemeToggle />
+                  <SignOutButton />
+                </div>
+              </details>
+              <button className="ghost" onClick={() => navigate(`/sessions/${sessionId}`)}>Back</button>
+            </div>
           </div>
         </div>
       </header>
