@@ -125,7 +125,6 @@ Create a demo session quickly:
 
 - AI Coach guidance is based on statistical aggregates (no replay or positional context).
 - If playlistAverage data is missing, coaching advice is less specific.
-- Player stats API responses can vary by account and region; missing stats are stored as `null`.
 - If the stats API rate limits or is unavailable, polling retries with exponential backoff and then skips that snapshot.
 - This is an unofficial personal project; API changes may break parsing.
 
