@@ -669,6 +669,26 @@ const chartData = useMemo(() => {
                 {teamCoachLoading ? "Generating..." : "Generate team coach report"}
               </button>
             </div>
+            {teamCoachLoading && (
+              <div className="coach-loading">
+                <svg className="coach-robot" viewBox="0 0 120 120" aria-hidden="true">
+                  <rect x="20" y="26" width="80" height="70" rx="16" />
+                  <circle className="robot-eye" cx="48" cy="58" r="6" />
+                  <circle className="robot-eye" cx="72" cy="58" r="6" />
+                  <rect x="46" y="72" width="28" height="6" rx="3" />
+                  <rect x="56" y="8" width="8" height="14" rx="4" />
+                  <circle cx="60" cy="6" r="6" />
+                </svg>
+                <div className="coach-thinking">
+                  <span>Thinking</span>
+                  <span className="coach-dots">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                </div>
+              </div>
+            )}
             {!teamCoachLatest && <p>No team coach report yet.</p>}
             {teamCoachLatest?.report && (
               <div className="coach-report">

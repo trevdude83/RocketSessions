@@ -71,6 +71,15 @@ export interface TimeseriesPoint {
   v: number | null;
 }
 
+export interface GameStatRow {
+  game: number;
+  result: "Win" | "Loss" | "Unknown";
+  goals: number | null;
+  shots: number | null;
+  assists: number | null;
+  saves: number | null;
+}
+
 export interface DbMetricPoint {
   t: string;
   sizeBytes: number;

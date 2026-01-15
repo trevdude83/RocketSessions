@@ -36,6 +36,19 @@ function parseJson<T>(value: string | undefined): T | null {
   }
 }
 
+function metricDelta(
+  current: DerivedMetrics | null | undefined,
+  previous: DerivedMetrics | null | undefined,
+  key: keyof DerivedMetrics
+): number | null {
+  const currentValue = current?.[key];
+  const previousValue = previous?.[key];
+  if (typeof currentValue === "number" && typeof previousValue === "number") {
+    return currentValue - previousValue;
+  }
+  return null;
+}
+
 function normalizeModelIds(models: string[]): string[] {
   return Array.from(new Set(models)).sort();
 }
@@ -1260,6 +1273,93 @@ router.get("/sessions/:id/timeseries", (req, res) => {
   });
 
   res.json(points);
+});
+
+router.get("/sessions/:id/game-stats", (req, res) => {
+  const sessionId = Number(req.params.id);
+  if (!sessionId) {
+    return res.status(400).json({ error: "Missing sessionId" });
+  }
+  const { userId, isAdmin } = resolveAccess(req);
+  const session = getSessionForUser(sessionId, userId, isAdmin);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+
+  const players = getPlayersBySession(sessionId);
+  if (players.length === 0) return res.json([]);
+
+  const snapshots = db
+    .prepare(
+      "SELECT playerId, matchIndex, capturedAt, derivedJson FROM snapshots WHERE sessionId = ? AND matchIndex IS NOT NULL ORDER BY capturedAt ASC"
+    )
+    .all(sessionId) as { playerId: number; matchIndex: number | null; capturedAt: string; derivedJson: string }[];
+
+  const perPlayer = new Map<number, Map<number, DerivedMetrics | null>>();
+  const matchIndexes = new Set<number>();
+
+  snapshots.forEach((snapshot) => {
+    if (snapshot.matchIndex === null || snapshot.matchIndex === undefined) return;
+    const derived = parseJson<DerivedMetrics>(snapshot.derivedJson);
+    if (!perPlayer.has(snapshot.playerId)) {
+      perPlayer.set(snapshot.playerId, new Map());
+    }
+    perPlayer.get(snapshot.playerId)!.set(snapshot.matchIndex, derived);
+    if (snapshot.matchIndex > 0) {
+      matchIndexes.add(snapshot.matchIndex);
+    }
+  });
+
+  const sortedMatchIndexes = Array.from(matchIndexes).sort((a, b) => a - b);
+
+  const rows = sortedMatchIndexes.map((matchIndex) => {
+    let goalsTotal: number | null = null;
+    let shotsTotal: number | null = null;
+    let assistsTotal: number | null = null;
+    let savesTotal: number | null = null;
+    let result: "Win" | "Loss" | "Unknown" = "Unknown";
+
+    players.forEach((player) => {
+      const map = perPlayer.get(player.id);
+      if (!map) return;
+      const current = map.get(matchIndex);
+      const previous = map.get(matchIndex - 1);
+      const goalsDelta = metricDelta(current, previous, "goals");
+      const shotsDelta = metricDelta(current, previous, "shots");
+      const assistsDelta = metricDelta(current, previous, "assists");
+      const savesDelta = metricDelta(current, previous, "saves");
+      const winsDelta = metricDelta(current, previous, "wins");
+      const lossesDelta = metricDelta(current, previous, "losses");
+
+      if (typeof goalsDelta === "number") {
+        goalsTotal = (goalsTotal ?? 0) + goalsDelta;
+      }
+      if (typeof shotsDelta === "number") {
+        shotsTotal = (shotsTotal ?? 0) + shotsDelta;
+      }
+      if (typeof assistsDelta === "number") {
+        assistsTotal = (assistsTotal ?? 0) + assistsDelta;
+      }
+      if (typeof savesDelta === "number") {
+        savesTotal = (savesTotal ?? 0) + savesDelta;
+      }
+
+      if (winsDelta === 1) {
+        result = "Win";
+      } else if (lossesDelta === 1 && result !== "Win") {
+        result = "Loss";
+      }
+    });
+
+    return {
+      game: matchIndex,
+      result,
+      goals: goalsTotal,
+      shots: shotsTotal,
+      assists: assistsTotal,
+      saves: savesTotal
+    };
+  });
+
+  res.json(rows);
 });
 
 router.get("/sessions/:id/snapshots", (req, res) => {

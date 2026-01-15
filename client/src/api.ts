@@ -1,4 +1,4 @@
-import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, PollingLogEntry, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry } from "./types";
+import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, PollingLogEntry, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, GameStatRow } from "./types";
 
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -209,6 +209,11 @@ export async function getTimeseries(
     `/api/sessions/${sessionId}/timeseries?playerId=${playerId}&metric=${encodeURIComponent(metric)}`
   );
   return handleJson<TimeseriesPoint[]>(res);
+}
+
+export async function getSessionGameStats(sessionId: number): Promise<GameStatRow[]> {
+  const res = await apiFetch(`/api/sessions/${sessionId}/game-stats`);
+  return handleJson<GameStatRow[]>(res);
 }
 
 export async function getSnapshots(

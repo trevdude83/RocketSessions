@@ -76,7 +76,7 @@ export default function CoachPanel({ sessionId, mode }: CoachPanelProps) {
 
   return (
     <section className="panel coach-panel">
-      <details className="coach-toggle" open>
+      <details className="coach-toggle">
         <summary>
           <h2>AI Coach</h2>
           <span className="coach-toggle-hint">Show or hide the coach report</span>
@@ -107,6 +107,27 @@ export default function CoachPanel({ sessionId, mode }: CoachPanelProps) {
               </label>
             </div>
           </div>
+
+          {loading && (
+            <div className="coach-loading">
+              <svg className="coach-robot" viewBox="0 0 120 120" aria-hidden="true">
+                <rect x="20" y="26" width="80" height="70" rx="16" />
+                <circle className="robot-eye" cx="48" cy="58" r="6" />
+                <circle className="robot-eye" cx="72" cy="58" r="6" />
+                <rect x="46" y="72" width="28" height="6" rx="3" />
+                <rect x="56" y="8" width="8" height="14" rx="4" />
+                <circle cx="60" cy="6" r="6" />
+              </svg>
+              <div className="coach-thinking">
+                <span>Thinking</span>
+                <span className="coach-dots">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </div>
+            </div>
+          )}
 
           {error && <p className="error">{error}</p>}
           {!selectedReport && !loading && <p>No coach report yet. Generate one to get insights.</p>}

@@ -6,6 +6,7 @@ import PlayerCard from "./PlayerCard";
 import ChartsPanel from "./ChartsPanel";
 import RankChart from "./RankChart";
 import TeamSessionStats from "./TeamSessionStats";
+import GameStatsTable from "./GameStatsTable";
 import CoachPanel from "./CoachPanel";
 import ThemeToggle from "./ThemeToggle";
 import BuildInfo from "./BuildInfo";
@@ -283,6 +284,25 @@ export default function SessionDashboard() {
         {error && <div className="alert error">{error}</div>}
 
         <div className="stack">
+          <section className="cards stack-section">
+            {players.map((player) => (
+              <PlayerCard
+                key={player.id}
+                player={player}
+                baseline={detail.baselineByPlayerId[player.id]}
+                latest={detail.latestByPlayerId[player.id]}
+                delta={deltas[player.id]}
+              />
+            ))}
+          </section>
+
+          <TeamSessionStats stats={summary?.teamStats} />
+          <GameStatsTable sessionId={sessionId} gameCount={summary?.teamStats?.gameCount} />
+          <ChartsPanel sessionId={sessionId} players={players} />
+
+          <RankChart sessionId={sessionId} players={players} />
+
+          <CoachPanel sessionId={sessionId} mode={detail.session.mode} />
           {canShare && (
             <section className="panel">
               <div className="section-header">
@@ -308,24 +328,6 @@ export default function SessionDashboard() {
               </div>
             </section>
           )}
-          <section className="cards">
-            {players.map((player) => (
-              <PlayerCard
-                key={player.id}
-                player={player}
-                baseline={detail.baselineByPlayerId[player.id]}
-                latest={detail.latestByPlayerId[player.id]}
-                delta={deltas[player.id]}
-              />
-            ))}
-          </section>
-
-          <TeamSessionStats stats={summary?.teamStats} />
-          <ChartsPanel sessionId={sessionId} players={players} />
-
-          <RankChart sessionId={sessionId} players={players} />
-
-          <CoachPanel sessionId={sessionId} mode={detail.session.mode} />
         </div>
       </main>
       <footer className="footer">
