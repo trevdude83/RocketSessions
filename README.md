@@ -1,11 +1,24 @@
 # Rocket League Session Manager
 
-A local, unofficial Rocket League session manager for two Xbox players. This project uses a third-party player stats API, stores snapshots in SQLite, and visualizes deltas and trends.
+A community-built Rocket League session manager focused on helping players review performance over time. This project is a personal, non-commercial tool created to improve the player experience with clear, session-based stats, trends, and coaching insights.
+
+## Community-first intent
+
+This project is built for the Rocket League community and has **no commercial ambitions**. It is an unofficial, fan-made tool intended to help players learn and improve. If you are reviewing access to official Rocket League APIs, please consider this as a community support project that prioritizes transparency and player benefit over monetization.
 
 ## Disclaimer
+
 Rocket League is a trademark of Psyonix, LLC. This project is unaffiliated with and not endorsed by Psyonix or Epic Games.
 
-## Setup
+## What it does
+
+- Track Rocket League sessions with two Xbox gamertags.
+- Store snapshots locally in SQLite for reliable session history.
+- Show deltas and trend charts per session.
+- Support manual snapshot uploads when automated polling is unavailable.
+- Generate AI Coach reports grounded in the stored metrics.
+
+## Quick start
 
 1) Install dependencies from the repo root:
 
@@ -13,11 +26,9 @@ Rocket League is a trademark of Psyonix, LLC. This project is unaffiliated with 
 npm install
 ```
 
-2) (Optional) Set your player stats API key if required by your account.
+2) Configure the player stats API:
 
-You can add it in System Admin > API settings or via a `.env` file at the repo root (see `.env.example`).
-
-Set `PLAYER_STATS_API_BASE_URL` in `.env` or System Admin to configure the player stats API endpoint.
+You can set the API key and base URL in System Admin > API settings, or via a `.env` file at the repo root (see `.env.example`).
 
 3) Run the dev servers:
 
@@ -28,12 +39,12 @@ npm run dev
 - Server: http://localhost:3001
 - Client: http://localhost:5173
 
-## Usage
+## Usage overview
 
 - Create a session with two Xbox gamertags.
-- The server fetches a baseline snapshot and polls every 60 seconds by default.
+- The server captures a baseline snapshot and polls on the configured interval.
 - Click "Refresh now" to trigger an immediate server-side fetch without starting another polling loop.
-- Stop a session to stop polling while keeping historical data.
+- Stop or end a session to retain the stored history.
 
 ## AI Coach (optional)
 
@@ -51,7 +62,7 @@ Then run:
 npm run dev
 ```
 
-Open a session and click "Generate Coach Report" in the AI Coach panel. You can also set the OpenAI key in System Admin > API settings. The server builds a compact coach packet from stored snapshots and the model returns a strict JSON report for the UI.
+Open a session and click "Generate Coach Report" in the AI Coach panel. The server builds a compact coach packet from stored snapshots and the model returns a strict JSON report for the UI.
 
 ## Demo
 
