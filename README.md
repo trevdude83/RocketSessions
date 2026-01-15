@@ -18,6 +18,18 @@ Rocket League is a trademark of Psyonix, LLC. This project is unaffiliated with 
 - Support manual snapshot uploads when automated polling is unavailable.
 - Generate AI Coach reports grounded in the stored metrics.
 
+## Tech stack
+
+- Node.js + TypeScript (server)
+- Express (API server)
+- SQLite with better-sqlite3 (local persistence)
+- React + Vite + TypeScript (client)
+- Recharts (charts)
+
+## Data storage note
+
+This project uses a local SQLite database stored on your machine. The database file is created on first run and is **not** included in the repository. If you delete it, the app will recreate a fresh database.
+
 ## Screenshots
 
 ![Dashboard](docs/screenshots/dashboard.PNG)
