@@ -1,4 +1,4 @@
-# Rocket League Session Manager
+# RocketSessions
 
 A community-built Rocket League session manager focused on helping players review performance over time. This project is a personal, non-commercial tool created to improve the player experience with clear, session-based stats, trends, and coaching insights.
 
