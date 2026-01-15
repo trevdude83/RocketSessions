@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4
+- Added per-game stats table to help validate session capture.
+- Added robot loader animation for session and team coach generation.
+- Resized player card metrics and rank display for better readability.
+- Reordered session layout (share section at bottom).
+
 ## 0.2.3
 - Removed the default player stats API endpoint; base URL must be configured by an admin.
 - Clarified System Admin messaging when the base URL is missing.
