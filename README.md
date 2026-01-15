@@ -108,6 +108,11 @@ npm run dev
 
 Open a session and click "Generate Coach Report" in the AI Coach panel. The server builds a compact coach packet from stored snapshots and the model returns a strict JSON report for the UI.
 
+Prompt tuning:
+- You can override the default **Session Coach** prompt and the **Team Coach** prompt separately in System Admin > AI Agent Settings.
+- The override replaces the default prompt entirely. Clearing the override reverts to the default.
+- You can also update the stored default prompt for each coach type from the same screen.
+
 ## Demo
 
 Create a demo session quickly:
