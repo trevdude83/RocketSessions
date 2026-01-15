@@ -12,7 +12,7 @@ coverage/
 .env
 .env.*
 !.env.example
-start-dev.bat
+*.bat
 
 # Local data / sqlite
 *.sqlite

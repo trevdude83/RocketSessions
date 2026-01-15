@@ -18,6 +18,12 @@ Rocket League is a trademark of Psyonix, LLC. This project is unaffiliated with 
 - Support manual snapshot uploads when automated polling is unavailable.
 - Generate AI Coach reports grounded in the stored metrics.
 
+## Screenshots
+
+![Session manager](docs/screenshots/sessionmanager.PNG)
+![Dashboard](docs/screenshots/dashboard.PNG)
+![Team dashboard](docs/screenshots/teamdash.PNG)
+
 ## Quick start
 
 1) Install dependencies from the repo root:
