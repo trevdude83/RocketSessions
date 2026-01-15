@@ -20,8 +20,8 @@ Rocket League is a trademark of Psyonix, LLC. This project is unaffiliated with 
 
 ## Screenshots
 
-![Session manager](docs/screenshots/sessionmanager.PNG)
 ![Dashboard](docs/screenshots/dashboard.PNG)
+![Session manager](docs/screenshots/sessionmanager.PNG)
 ![Team dashboard](docs/screenshots/teamdash.PNG)
 
 ## Quick start
