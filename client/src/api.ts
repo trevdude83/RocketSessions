@@ -323,7 +323,7 @@ export async function getApiKeyValue(reveal = false): Promise<{ configured: bool
   return handleJson(res);
 }
 
-export async function setApiBaseUrl(apiBaseUrl: string): Promise<{ ok: boolean; stored: string | null; effective: string }> {
+export async function setApiBaseUrl(apiBaseUrl: string): Promise<{ ok: boolean; stored: string | null; effective: string | null }> {
   const res = await apiFetch("/api/settings/api-base-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -332,7 +332,7 @@ export async function setApiBaseUrl(apiBaseUrl: string): Promise<{ ok: boolean; 
   return handleJson(res);
 }
 
-export async function getApiBaseUrl(): Promise<{ value: string | null; effective: string; default: string }> {
+export async function getApiBaseUrl(): Promise<{ value: string | null; effective: string | null }> {
   const res = await apiFetch("/api/settings/api-base-url");
   return handleJson(res);
 }

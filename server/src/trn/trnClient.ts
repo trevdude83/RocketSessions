@@ -4,7 +4,6 @@ import { Platform } from "../types.js";
 const require = createRequire(import.meta.url);
 require("trn-rocket-league");
 
-const DEFAULT_BASE_URL = "https://api.tracker.gg/api/v2/rocket-league/standard/profile";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const MAX_RETRY_AFTER_MS = 10 * 60 * 1000;
 
@@ -41,7 +40,11 @@ export function getRateLimitInfo() {
 }
 
 function getBaseUrl(): string {
-  return process.env.PLAYER_STATS_API_BASE_URL || DEFAULT_BASE_URL;
+  const value = process.env.PLAYER_STATS_API_BASE_URL;
+  if (!value) {
+    throw new Error("Player stats API base URL is not configured.");
+  }
+  return value;
 }
 
 function parseResetAtMs(value: string | null): number | null {

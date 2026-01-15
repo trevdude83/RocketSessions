@@ -17,7 +17,7 @@ npm install
 
 You can add it in System Admin > API settings or via a `.env` file at the repo root (see `.env.example`).
 
-If you want to override the player stats API endpoint, set `PLAYER_STATS_API_BASE_URL` in `.env` or System Admin.
+Set `PLAYER_STATS_API_BASE_URL` in `.env` or System Admin to configure the player stats API endpoint.
 
 3) Run the dev servers:
 

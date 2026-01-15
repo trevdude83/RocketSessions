@@ -1,4 +1,4 @@
 PLAYER_STATS_API_KEY=
-PLAYER_STATS_API_BASE_URL=https://api.tracker.gg/api/v2/rocket-league/standard/profile
+PLAYER_STATS_API_BASE_URL=
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini

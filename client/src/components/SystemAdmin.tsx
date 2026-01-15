@@ -65,7 +65,6 @@ export default function SystemAdmin() {
   const [showCurrentKey, setShowCurrentKey] = useState(false);
   const [loadingCurrentKey, setLoadingCurrentKey] = useState(false);
   const [apiBaseUrl, setApiBaseUrlValue] = useState("");
-  const [apiBaseUrlDefault, setApiBaseUrlDefault] = useState<string | null>(null);
   const [apiBaseUrlEffective, setApiBaseUrlEffective] = useState<string | null>(null);
   const [savingApiBaseUrl, setSavingApiBaseUrl] = useState(false);
   const [apiBaseUrlMessage, setApiBaseUrlMessage] = useState<string | null>(null);
@@ -211,7 +210,6 @@ export default function SystemAdmin() {
     getApiBaseUrl()
       .then((result) => {
         setApiBaseUrlValue(result.value ?? "");
-        setApiBaseUrlDefault(result.default ?? null);
         setApiBaseUrlEffective(result.effective ?? null);
       })
       .catch(() => undefined);
@@ -583,7 +581,7 @@ export default function SystemAdmin() {
                   <input
                     type="text"
                     value={apiBaseUrl}
-                    placeholder={apiBaseUrlDefault || "Default base URL"}
+                    placeholder="Enter base URL"
                     onChange={(e) => setApiBaseUrlValue(e.target.value)}
                   />
                 </label>
@@ -591,10 +589,10 @@ export default function SystemAdmin() {
                   <button onClick={handleSaveApiBaseUrl} disabled={savingApiBaseUrl}>
                     {savingApiBaseUrl ? "Saving..." : "Save base URL"}
                   </button>
-                  {apiBaseUrlEffective && <span>Using {apiBaseUrlEffective}</span>}
+                  {apiBaseUrlEffective ? <span>Using {apiBaseUrlEffective}</span> : <span>Not configured</span>}
                   {apiBaseUrlMessage && <span>{apiBaseUrlMessage}</span>}
                 </div>
-                <p className="note">Leave blank to use the default player stats API endpoint.</p>
+                <p className="note">Leave blank to disable API requests until configured.</p>
                 </div>
               </div>
               <div className="panel-block">

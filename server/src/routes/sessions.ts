@@ -18,8 +18,6 @@ import OpenAI from "openai";
 const router = Router();
 router.use(requireAuth);
 
-const DEFAULT_PLAYER_STATS_API_BASE_URL = "https://api.tracker.gg/api/v2/rocket-league/standard/profile";
-
 const sessionStatsCache = new Map<string, { wins: number | null; losses: number | null; winRate: number | null }>();
 const sessionStatsCooldown = new Map<string, number>();
 
@@ -1488,7 +1486,7 @@ router.post("/settings/api-base-url", requireAdmin, (req, res) => {
   if (trimmed.length > 0 && stored !== trimmed) {
     console.error("Failed to persist PLAYER_STATS_API_BASE_URL to app_settings.");
   }
-  const effective = process.env.PLAYER_STATS_API_BASE_URL || DEFAULT_PLAYER_STATS_API_BASE_URL;
+  const effective = process.env.PLAYER_STATS_API_BASE_URL || null;
   res.json({ ok: true, stored, effective });
 });
 
@@ -1514,8 +1512,7 @@ router.get("/settings/api-base-url", requireAdmin, (req, res) => {
   const normalized = value && value.trim().length > 0 ? value : null;
   res.json({
     value: normalized,
-    effective: normalized || DEFAULT_PLAYER_STATS_API_BASE_URL,
-    default: DEFAULT_PLAYER_STATS_API_BASE_URL
+    effective: normalized
   });
 });
 
@@ -1649,7 +1646,7 @@ router.post("/settings/coach-prompt/default", requireAdmin, (req, res) => {
       dbPath: db.name,
       keys: rows.map((row) => row.key),
       playerStatsApiBaseUrl: baseUrl || null,
-      playerStatsApiBaseUrlEffective: baseUrl || DEFAULT_PLAYER_STATS_API_BASE_URL,
+      playerStatsApiBaseUrlEffective: baseUrl || null,
       configured: Boolean(
         process.env.PLAYER_STATS_API_KEY ||
           process.env.TRN_API_KEY ||
