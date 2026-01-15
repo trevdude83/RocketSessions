@@ -61,7 +61,7 @@ npm run dev
 
 ## Usage overview
 
-- Create a session with two Xbox gamertags.
+- Create a session with two gamertags.
 - The server captures a baseline snapshot and polls on the configured interval.
 - Click "Refresh now" to trigger an immediate server-side fetch without starting another polling loop.
 - Stop or end a session to retain the stored history.
