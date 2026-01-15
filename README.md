@@ -116,10 +116,6 @@ Create a demo session quickly:
 # POST http://localhost:3001/api/demo
 ```
 
-## Production note
-
-This repo assumes the client and server run separately in development. For production, build both and serve the client with a static host or wire Express to serve `client/dist`.
-
 ## Known limitations
 
 - AI Coach guidance is based on statistical aggregates (no replay or positional context).
