@@ -12,7 +12,7 @@ Rocket League is a trademark of Psyonix, LLC. This project is unaffiliated with 
 
 ## What it does
 
-- Track Rocket League sessions with two Xbox gamertags.
+- Track Rocket League sessions across competitive modes (solo, 2v2, 3v3, 4v4).
 - Store snapshots locally in SQLite for reliable session history.
 - Show deltas and trend charts per session.
 - Support manual snapshot uploads when automated polling is unavailable.
@@ -61,7 +61,7 @@ npm run dev
 
 ## Usage overview
 
-- Create a session with two gamertags.
+- Create a session for solo or team modes (2v2, 3v3, 4v4) using the relevant gamertags.
 - The server captures a baseline snapshot and polls on the configured interval.
 - Click "Refresh now" to trigger an immediate server-side fetch without starting another polling loop.
 - Stop or end a session to retain the stored history.
