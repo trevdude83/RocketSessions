@@ -72,3 +72,7 @@ This repo assumes the client and server run separately in development. For produ
 - Player stats API responses can vary by account and region; missing stats are stored as `null`.
 - If the stats API rate limits or is unavailable, polling retries with exponential backoff and then skips that snapshot.
 - This is an unofficial personal project; API changes may break parsing.
+
+## License
+
+MIT
