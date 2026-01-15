@@ -85,6 +85,11 @@ ADMIN_PASSWORD="your_password"
 
 After that, admins can approve or manage users from User Admin.
 
+Environment variable loading order:
+- `.env` file in the repo root (loaded by `dotenv` on server start).
+- System Admin settings saved in the local database (loaded on server start).
+- Current shell environment (`$env:VAR` or `set VAR=...`) overrides defaults.
+
 ## AI Coach (optional)
 
 Enable AI Coach by setting OpenAI credentials:
