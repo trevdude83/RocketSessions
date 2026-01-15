@@ -34,16 +34,26 @@ process.on("uncaughtException", (error) => {
 });
 
 app.listen(port, () => {
-  const savedKey = getSetting("TRN_API_KEY");
-  let key = savedKey || process.env.TRN_API_KEY;
+  const savedKey = getSetting("PLAYER_STATS_API_KEY") || getSetting("TRN_API_KEY");
+  let key = savedKey || process.env.PLAYER_STATS_API_KEY || process.env.TRN_API_KEY;
+  const savedBaseUrl = getSetting("PLAYER_STATS_API_BASE_URL");
   const savedOpenAi = getSetting("OPENAI_API_KEY");
   const savedModel = getSetting("OPENAI_MODEL");
-  if (!key || !savedOpenAi || !savedModel) {
+  if (!key || !savedBaseUrl || !savedOpenAi || !savedModel) {
     const settingsPath = path.join(path.dirname(db.name), "app-settings.json");
     if (fs.existsSync(settingsPath)) {
       try {
-        const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as { TRN_API_KEY?: string; OPENAI_API_KEY?: string; OPENAI_MODEL?: string };
-        key = key || parsed.TRN_API_KEY;
+        const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as {
+          PLAYER_STATS_API_KEY?: string;
+          TRN_API_KEY?: string;
+          PLAYER_STATS_API_BASE_URL?: string;
+          OPENAI_API_KEY?: string;
+          OPENAI_MODEL?: string;
+        };
+        key = key || parsed.PLAYER_STATS_API_KEY || parsed.TRN_API_KEY;
+        if (!process.env.PLAYER_STATS_API_BASE_URL && parsed.PLAYER_STATS_API_BASE_URL) {
+          process.env.PLAYER_STATS_API_BASE_URL = parsed.PLAYER_STATS_API_BASE_URL;
+        }
         if (!process.env.OPENAI_API_KEY && parsed.OPENAI_API_KEY) {
           process.env.OPENAI_API_KEY = parsed.OPENAI_API_KEY;
         }
@@ -53,14 +63,17 @@ app.listen(port, () => {
       } catch {}
     }
   }
-  if (key && !process.env.TRN_API_KEY) {
-    process.env.TRN_API_KEY = key;
+  if (key && !process.env.PLAYER_STATS_API_KEY && !process.env.TRN_API_KEY) {
+    process.env.PLAYER_STATS_API_KEY = key;
   }
   if (savedOpenAi && !process.env.OPENAI_API_KEY) {
     process.env.OPENAI_API_KEY = savedOpenAi;
   }
   if (savedModel && !process.env.OPENAI_MODEL) {
     process.env.OPENAI_MODEL = savedModel;
+  }
+  if (savedBaseUrl && !process.env.PLAYER_STATS_API_BASE_URL) {
+    process.env.PLAYER_STATS_API_BASE_URL = savedBaseUrl;
   }
   const activeSessions = db
     .prepare("SELECT id, pollingIntervalSeconds FROM sessions WHERE isActive = 1")

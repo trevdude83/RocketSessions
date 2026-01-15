@@ -205,7 +205,7 @@ async function captureProfileSnapshots(sessionId: number, matchIndex: number | n
     } catch (error) {
       if (isRateLimitError(error)) {
         const seconds = Math.ceil(error.retryAfterMs / 1000);
-        console.warn(`TRN rate limited for ${player.gamertag}. Cooldown ${seconds}s.`);
+        console.warn(`Stats API rate limited for ${player.gamertag}. Cooldown ${seconds}s.`);
         continue;
       }
       console.warn(
@@ -338,7 +338,7 @@ export async function pollForNewMatchSnapshots(sessionId: number): Promise<void>
           latestMatchId !== player.lastMatchId &&
           !lastMatchInList
         ) {
-          // Fallback when TRN caps match history and timestamps are missing.
+          // Fallback when the stats API caps match history and timestamps are missing.
           newMatches = 1;
         }
         addPollingLog({
@@ -395,7 +395,7 @@ export async function captureManualSnapshot(sessionId: number): Promise<void> {
     if (!session) return;
     const remaining = getRateLimitRemainingMs();
     if (remaining > 0) {
-      const error = new Error("TRN rate limit cooldown.");
+      const error = new Error("Stats API rate limit cooldown.");
       (error as any).retryAfterMs = remaining;
       throw error;
     }

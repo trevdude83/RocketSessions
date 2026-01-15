@@ -83,7 +83,7 @@ export default function SessionDashboard() {
       const retryAfterMs = getRetryAfterMs(err);
       if (typeof retryAfterMs === "number") {
         setRefreshCooldownMs(retryAfterMs);
-        setError("TRN rate limited. Refresh will unlock after cooldown.");
+        setError("Stats API rate limited. Refresh will unlock after cooldown.");
       } else {
         setError(err.message || "Refresh failed");
       }

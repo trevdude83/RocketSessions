@@ -176,7 +176,7 @@ export async function refreshSessionWithCooldown(
     try {
       const parsed = JSON.parse(text) as { error?: string; retryAfterMs?: number };
       if (res.status === 429 && typeof parsed.retryAfterMs === "number") {
-        const error = new Error(parsed.error || "TRN rate limited") as Error & {
+        const error = new Error(parsed.error || "Stats API rate limited") as Error & {
           retryAfterMs?: number;
         };
         error.retryAfterMs = parsed.retryAfterMs;
@@ -276,7 +276,7 @@ export async function getCoachAuditLogs(limit = 200): Promise<CoachAuditEntry[]>
   return handleJson<CoachAuditEntry[]>(res);
 }
 
-export async function getTrnStatus(
+export async function getStatsApiStatus(
   gamertag: string,
   platform = "xbl",
   force = false
@@ -289,7 +289,7 @@ export async function getTrnStatus(
   headers?: Record<string, string>;
 }> {
   const res = await apiFetch(
-    `/api/trn/status?platform=${encodeURIComponent(platform)}&gamertag=${encodeURIComponent(gamertag)}&force=${force ? "1" : "0"}`
+    `/api/stats/status?platform=${encodeURIComponent(platform)}&gamertag=${encodeURIComponent(gamertag)}&force=${force ? "1" : "0"}`
   );
   return handleJson(res);
 }
@@ -320,6 +320,20 @@ export async function getApiKeyStatus(): Promise<{ configured: boolean }> {
 
 export async function getApiKeyValue(reveal = false): Promise<{ configured: boolean; value: string | null }> {
   const res = await apiFetch(`/api/settings/api-key?reveal=${reveal ? "1" : "0"}`);
+  return handleJson(res);
+}
+
+export async function setApiBaseUrl(apiBaseUrl: string): Promise<{ ok: boolean; stored: string | null; effective: string }> {
+  const res = await apiFetch("/api/settings/api-base-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiBaseUrl })
+  });
+  return handleJson(res);
+}
+
+export async function getApiBaseUrl(): Promise<{ value: string | null; effective: string; default: string }> {
+  const res = await apiFetch("/api/settings/api-base-url");
   return handleJson(res);
 }
 

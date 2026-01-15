@@ -1,6 +1,6 @@
 import { addSessionShare, db, createSession, createPlayers, createTeam, deleteSession, endSession, findTeamByRoster, getBaselineSnapshot, getDbMetrics, getLatestSnapshot, getLatestSnapshotByGamertag, getPlayersBySession, getRecentSnapshots, getSession, getSessionForUser, getSessionTeamStats, getTeam, getTeamForUser, getUserByEmail, getUserById, getUserByUsername, insertCoachAudit, insertCoachReport, insertSessionTeamStats, insertSnapshot, recordDbMetric, setSessionManualMode, setSessionMatchIndex, getLatestCoachReport, listCoachAudit, listCoachReports, listCoachReportsByTeam, listSessions, listSessionsForUser, listTeamStats, listTeams, listTeamsForUser, removeSessionShare, setSetting, getSetting, updateTeamName, insertTeamCoachReport, getLatestTeamCoachReport, listTeamCoachReports, getLatestAvatarUrlByGamertag } from "../db.js";
 import { captureManualSnapshot, initializeSession, startPolling, stopPolling } from "../sessionManager.js";
-import { fetchPlayerSessions, getRateLimitInfo, getRateLimitRemainingMs, getTrnStatus, isRateLimitError } from "../trn/trnClient.js";
+import { fetchPlayerSessions, getRateLimitInfo, getRateLimitRemainingMs, getStatsApiStatus, isRateLimitError } from "../trn/trnClient.js";
 import { extractMetrics } from "../trn/extractMetrics.js";
 import { DerivedMetrics, PlayerInput, SessionRow } from "../types.js";
 import { buildCoachPacket } from "../coach/buildCoachPacket.js";
@@ -17,6 +17,8 @@ import OpenAI from "openai";
 
 const router = Router();
 router.use(requireAuth);
+
+const DEFAULT_PLAYER_STATS_API_BASE_URL = "https://api.tracker.gg/api/v2/rocket-league/standard/profile";
 
 const sessionStatsCache = new Map<string, { wins: number | null; losses: number | null; winRate: number | null }>();
 const sessionStatsCooldown = new Map<string, number>();
@@ -579,17 +581,17 @@ router.post("/sessions/:id/refresh", async (req, res) => {
   const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
   if (session.manualMode) {
-    return res.status(400).json({ error: "Manual sessions do not support TRN refresh." });
+    return res.status(400).json({ error: "Manual sessions do not support stats API refresh." });
   }
   const remaining = getRateLimitRemainingMs();
   if (remaining > 0) {
-    return res.status(429).json({ error: "TRN rate limited. Try again later.", retryAfterMs: remaining });
+    return res.status(429).json({ error: "Stats API rate limited. Try again later.", retryAfterMs: remaining });
   }
   try {
     await captureManualSnapshot(sessionId);
   } catch (error) {
     if (isRateLimitError(error)) {
-      return res.status(429).json({ error: "TRN rate limited. Try again later.", retryAfterMs: error.retryAfterMs });
+      return res.status(429).json({ error: "Stats API rate limited. Try again later.", retryAfterMs: error.retryAfterMs });
     }
     throw error;
   }
@@ -1432,14 +1434,14 @@ router.post("/sessions/:id/snapshots/manual", (req, res) => {
   res.json({ ok: true, matchIndex, inserted, skipped });
 });
 
-router.get("/trn/status", requireAdmin, async (req, res) => {
+router.get("/stats/status", requireAdmin, async (req, res) => {
   const platform = (req.query.platform as string) || "xbl";
   const gamertag = req.query.gamertag as string | undefined;
   const force = req.query.force === "1" || req.query.force === "true";
   if (!gamertag) {
     return res.status(400).json({ error: "Missing gamertag" });
   }
-  const result = await getTrnStatus(platform as any, gamertag, { force });
+  const result = await getStatsApiStatus(platform as any, gamertag, { force });
   res.json({ ...result, rateLimit: getRateLimitInfo() });
 });
 
@@ -1459,23 +1461,62 @@ router.post("/settings/api-key", requireAdmin, (req, res) => {
     return res.status(400).json({ error: "Missing apiKey" });
   }
   const trimmed = apiKey.trim();
-  process.env.TRN_API_KEY = trimmed;
-  setSetting("TRN_API_KEY", trimmed);
-  const stored = getSetting("TRN_API_KEY") || trimmed;
+  process.env.PLAYER_STATS_API_KEY = trimmed;
+  setSetting("PLAYER_STATS_API_KEY", trimmed);
+  const stored = getSetting("PLAYER_STATS_API_KEY") || trimmed;
   if (!stored) {
-    console.error("Failed to persist TRN_API_KEY to app_settings.");
+    console.error("Failed to persist PLAYER_STATS_API_KEY to app_settings.");
     return res.status(500).json({ error: "Failed to persist API key" });
   }
   res.json({ ok: true });
 });
 
+router.post("/settings/api-base-url", requireAdmin, (req, res) => {
+  const { apiBaseUrl } = req.body as { apiBaseUrl?: string };
+  if (typeof apiBaseUrl !== "string") {
+    return res.status(400).json({ error: "Missing apiBaseUrl" });
+  }
+  const trimmed = apiBaseUrl.trim();
+  if (trimmed.length === 0) {
+    delete process.env.PLAYER_STATS_API_BASE_URL;
+    setSetting("PLAYER_STATS_API_BASE_URL", "");
+  } else {
+    process.env.PLAYER_STATS_API_BASE_URL = trimmed;
+    setSetting("PLAYER_STATS_API_BASE_URL", trimmed);
+  }
+  const stored = getSetting("PLAYER_STATS_API_BASE_URL");
+  if (trimmed.length > 0 && stored !== trimmed) {
+    console.error("Failed to persist PLAYER_STATS_API_BASE_URL to app_settings.");
+  }
+  const effective = process.env.PLAYER_STATS_API_BASE_URL || DEFAULT_PLAYER_STATS_API_BASE_URL;
+  res.json({ ok: true, stored, effective });
+});
+
 router.get("/settings/api-key", requireAdmin, (req, res) => {
-  const value = process.env.TRN_API_KEY || getSetting("TRN_API_KEY");
-  if (value && !process.env.TRN_API_KEY) {
-    process.env.TRN_API_KEY = value;
+  const value =
+    process.env.PLAYER_STATS_API_KEY ||
+    process.env.TRN_API_KEY ||
+    getSetting("PLAYER_STATS_API_KEY") ||
+    getSetting("TRN_API_KEY");
+  if (value && !process.env.PLAYER_STATS_API_KEY && !process.env.TRN_API_KEY) {
+    process.env.PLAYER_STATS_API_KEY = value;
   }
   const reveal = req.query.reveal === "1" || req.query.reveal === "true";
   res.json({ configured: Boolean(value), value: reveal ? value : null });
+});
+
+router.get("/settings/api-base-url", requireAdmin, (req, res) => {
+  const value =
+    process.env.PLAYER_STATS_API_BASE_URL || getSetting("PLAYER_STATS_API_BASE_URL");
+  if (value && !process.env.PLAYER_STATS_API_BASE_URL) {
+    process.env.PLAYER_STATS_API_BASE_URL = value;
+  }
+  const normalized = value && value.trim().length > 0 ? value : null;
+  res.json({
+    value: normalized,
+    effective: normalized || DEFAULT_PLAYER_STATS_API_BASE_URL,
+    default: DEFAULT_PLAYER_STATS_API_BASE_URL
+  });
 });
 
 router.post("/settings/openai-key", requireAdmin, (req, res) => {
@@ -1600,12 +1641,21 @@ router.post("/settings/coach-prompt/default", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-router.get("/settings/debug", requireAdmin, (req, res) => {
-  const rows = db.prepare("SELECT key FROM app_settings").all() as { key: string }[];
-  res.json({
-    dbPath: db.name,
-    keys: rows.map((row) => row.key),
-    configured: Boolean(process.env.TRN_API_KEY || getSetting("TRN_API_KEY"))
+  router.get("/settings/debug", requireAdmin, (req, res) => {
+    const rows = db.prepare("SELECT key FROM app_settings").all() as { key: string }[];
+    const baseUrl =
+      process.env.PLAYER_STATS_API_BASE_URL || getSetting("PLAYER_STATS_API_BASE_URL");
+    res.json({
+      dbPath: db.name,
+      keys: rows.map((row) => row.key),
+      playerStatsApiBaseUrl: baseUrl || null,
+      playerStatsApiBaseUrlEffective: baseUrl || DEFAULT_PLAYER_STATS_API_BASE_URL,
+      configured: Boolean(
+        process.env.PLAYER_STATS_API_KEY ||
+          process.env.TRN_API_KEY ||
+          getSetting("PLAYER_STATS_API_KEY") ||
+          getSetting("TRN_API_KEY")
+      )
   });
 });
 

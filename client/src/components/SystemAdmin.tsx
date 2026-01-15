@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   getApiKeyStatus,
   getApiKeyValue,
+  getApiBaseUrl,
   getCoachAuditLogs,
   getCoachPacket,
   getCoachPrompt,
@@ -17,11 +18,12 @@ import {
   setDefaultTeamCoachPrompt,
   getOpenAiModels,
   getOpenAiStatus,
-  getTrnStatus,
+  getStatsApiStatus,
   listSessions,
   listTeams,
   refreshOpenAiModels,
   setApiKey,
+  setApiBaseUrl,
   setCoachPrompt,
   setOpenAiKey
 } from "../api";
@@ -62,6 +64,11 @@ export default function SystemAdmin() {
   const [currentApiKey, setCurrentApiKey] = useState<string | null>(null);
   const [showCurrentKey, setShowCurrentKey] = useState(false);
   const [loadingCurrentKey, setLoadingCurrentKey] = useState(false);
+  const [apiBaseUrl, setApiBaseUrlValue] = useState("");
+  const [apiBaseUrlDefault, setApiBaseUrlDefault] = useState<string | null>(null);
+  const [apiBaseUrlEffective, setApiBaseUrlEffective] = useState<string | null>(null);
+  const [savingApiBaseUrl, setSavingApiBaseUrl] = useState(false);
+  const [apiBaseUrlMessage, setApiBaseUrlMessage] = useState<string | null>(null);
 
   const [openAiKey, setOpenAiKeyValue] = useState("");
   const [openAiModel, setOpenAiModel] = useState("gpt-4o-mini");
@@ -201,6 +208,13 @@ export default function SystemAdmin() {
     getDefaultTeamCoachPrompt()
       .then((result) => setDefaultTeamCoachPrompt(result.prompt))
       .catch(() => undefined);
+    getApiBaseUrl()
+      .then((result) => {
+        setApiBaseUrlValue(result.value ?? "");
+        setApiBaseUrlDefault(result.default ?? null);
+        setApiBaseUrlEffective(result.effective ?? null);
+      })
+      .catch(() => undefined);
   }, []);
 
   const latestDbSize = dbMetrics.length > 0 ? dbMetrics[dbMetrics.length - 1].sizeBytes : null;
@@ -241,6 +255,24 @@ export default function SystemAdmin() {
       setError(err.message || "Failed to load API key");
     } finally {
       setLoadingCurrentKey(false);
+    }
+  }
+
+  async function handleSaveApiBaseUrl() {
+    setSavingApiBaseUrl(true);
+    setError(null);
+    setApiBaseUrlMessage(null);
+    try {
+      const result = await setApiBaseUrl(apiBaseUrl);
+      setApiBaseUrlEffective(result.effective ?? null);
+      setApiBaseUrlMessage(
+        apiBaseUrl.trim().length === 0 ? "Using default API base URL." : "API base URL saved."
+      );
+    } catch (err: any) {
+      setError(err.message || "Failed to save API base URL");
+      setApiBaseUrlMessage("Failed to save API base URL.");
+    } finally {
+      setSavingApiBaseUrl(false);
     }
   }
 
@@ -442,10 +474,10 @@ export default function SystemAdmin() {
     setTrnStatus(null);
     setError(null);
     try {
-      const result = await getTrnStatus(trnGamertag, "xbl", forceTrnCheck);
+      const result = await getStatsApiStatus(trnGamertag, "xbl", forceTrnCheck);
       setTrnStatus(result);
     } catch (err: any) {
-      setError(err.message || "Failed to check TRN status");
+      setError(err.message || "Failed to check API status");
     } finally {
       setCheckingTrn(false);
     }
@@ -511,14 +543,14 @@ export default function SystemAdmin() {
               </div>
               <span className="collapse-hint">Show</span>
             </summary>
-            <p className="panel-help">Manage the Tracker Network and OpenAI keys used by the server.</p>
+          <p className="panel-help">Manage the player stats API and OpenAI keys used by the server.</p>
             <div className="panel-grid ai-grid">
               <div className="panel-block">
-                <h3>Tracker Network</h3>
-                <p className="panel-help">Required to fetch Rocket League stats.</p>
+              <h3>Player stats API</h3>
+              <p className="panel-help">Required to fetch Rocket League stats.</p>
               <div className="form">
                 <label>
-                  Tracker Network API key
+                  Player stats API key
                   <input
                     type="password"
                     value={apiKey}
@@ -546,11 +578,28 @@ export default function SystemAdmin() {
                     />
                   )}
                 </div>
+                <label>
+                  Player stats API base URL
+                  <input
+                    type="text"
+                    value={apiBaseUrl}
+                    placeholder={apiBaseUrlDefault || "Default base URL"}
+                    onChange={(e) => setApiBaseUrlValue(e.target.value)}
+                  />
+                </label>
+                <div className="actions">
+                  <button onClick={handleSaveApiBaseUrl} disabled={savingApiBaseUrl}>
+                    {savingApiBaseUrl ? "Saving..." : "Save base URL"}
+                  </button>
+                  {apiBaseUrlEffective && <span>Using {apiBaseUrlEffective}</span>}
+                  {apiBaseUrlMessage && <span>{apiBaseUrlMessage}</span>}
+                </div>
+                <p className="note">Leave blank to use the default player stats API endpoint.</p>
                 </div>
               </div>
               <div className="panel-block">
-                <h3>TRN status check</h3>
-                <p className="panel-help">Test whether Tracker Network is accepting requests for a gamertag.</p>
+                <h3>API status check</h3>
+                <p className="panel-help">Test whether the player stats API is accepting requests for a gamertag.</p>
                 <div className="form">
                   <label>
                     Gamertag
@@ -571,7 +620,7 @@ export default function SystemAdmin() {
                   </label>
                   <div className="actions">
                     <button onClick={handleCheckTrn} disabled={checkingTrn || !trnGamertag}>
-                      {checkingTrn ? "Checking..." : "Check TRN status"}
+                    {checkingTrn ? "Checking..." : "Check API status"}
                     </button>
                     {trnStatus && (
                       <span className={trnStatus.ok ? "status-pill ok" : "status-pill error"}>
@@ -897,8 +946,8 @@ export default function SystemAdmin() {
                 <span>Player</span>
                 <span>Last match ID</span>
                 <span>Last match at</span>
-                <span>TRN latest ID</span>
-                <span>TRN latest at</span>
+                <span>API latest ID</span>
+                <span>API latest at</span>
                 <span>New matches</span>
                 <span>Total matches</span>
                 <span>Error</span>

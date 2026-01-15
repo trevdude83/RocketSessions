@@ -239,7 +239,7 @@ export default function AdvancedSession() {
             <h2>Manual snapshot upload</h2>
           </div>
           <p className="panel-help">
-            Paste TRN profile JSON after each game. Temporary fallback while API access is limited.
+            Paste player stats API profile JSON after each game. Temporary fallback while API access is limited.
           </p>
           <div className="form">
             <label>
@@ -257,7 +257,7 @@ export default function AdvancedSession() {
                 {player.gamertag} JSON
                 <textarea
                   rows={6}
-                  placeholder="Paste TRN profile JSON here..."
+                  placeholder="Paste player stats API profile JSON here..."
                   value={manualPayloads[player.id] ?? ""}
                   onChange={(e) =>
                     setManualPayloads((prev) => ({ ...prev, [player.id]: e.target.value }))

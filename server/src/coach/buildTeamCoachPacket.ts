@@ -336,7 +336,7 @@ export function buildTeamCoachPacket(teamId: number): TeamCoachPacket {
   const lossesDerived = history.some((entry) => entry.lossesDerived);
   const notes: string[] = [];
   if (sessionsWithoutMatches > 0) {
-    notes.push("Some sessions have 0 matches played; may be idle or TRN delay.");
+    notes.push("Some sessions have 0 matches played; may be idle or API delay.");
   }
   if (lossesDerived) {
     notes.push("Losses were derived from matches played for some sessions.");

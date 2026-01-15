@@ -4,7 +4,7 @@ import { Platform } from "../types.js";
 const require = createRequire(import.meta.url);
 require("trn-rocket-league");
 
-const BASE_URL = "https://api.tracker.gg/api/v2/rocket-league/standard/profile";
+const DEFAULT_BASE_URL = "https://api.tracker.gg/api/v2/rocket-league/standard/profile";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const MAX_RETRY_AFTER_MS = 10 * 60 * 1000;
 
@@ -38,6 +38,10 @@ export function getRateLimitRemainingMs(): number {
 
 export function getRateLimitInfo() {
   return { ...rateLimitInfo };
+}
+
+function getBaseUrl(): string {
+  return process.env.PLAYER_STATS_API_BASE_URL || DEFAULT_BASE_URL;
 }
 
 function parseResetAtMs(value: string | null): number | null {
@@ -74,8 +78,9 @@ function buildHeaders(): Record<string, string> {
     "Accept": "application/json",
     "Accept-Language": "en-US,en;q=0.9"
   };
-  if (process.env.TRN_API_KEY) {
-    headers["TRN-Api-Key"] = process.env.TRN_API_KEY;
+  const apiKey = process.env.PLAYER_STATS_API_KEY || process.env.TRN_API_KEY;
+  if (apiKey) {
+    headers["TRN-Api-Key"] = apiKey;
   }
   return headers;
 }
@@ -83,7 +88,7 @@ function buildHeaders(): Record<string, string> {
 async function fetchJson(url: string): Promise<unknown> {
   const remaining = getRateLimitRemainingMs();
   if (remaining > 0) {
-    throw new RateLimitError("TRN rate limit cooldown.", remaining);
+    throw new RateLimitError("Stats API rate limit cooldown.", remaining);
   }
 
   const response = await fetch(url, {
@@ -96,17 +101,17 @@ async function fetchJson(url: string): Promise<unknown> {
     if (response.status === 429) {
       const retryAfter = parseRetryAfterMs(response.headers.get("retry-after")) ?? 60_000;
       globalRateLimitUntil = Math.max(globalRateLimitUntil, Date.now() + retryAfter);
-      throw new RateLimitError("TRN rate limit (429).", retryAfter);
+      throw new RateLimitError("Stats API rate limit (429).", retryAfter);
     }
-    if (response.status === 403 && !process.env.TRN_API_KEY) {
-      throw new Error("TRN 403. Set TRN_API_KEY to access Tracker Network.");
+    if (response.status === 403 && !process.env.PLAYER_STATS_API_KEY && !process.env.TRN_API_KEY) {
+      throw new Error("Stats API 403. Set a player stats API key in System Admin.");
     }
     if (text.includes("error code: 1015")) {
       const retryAfter = 60_000;
       globalRateLimitUntil = Math.max(globalRateLimitUntil, Date.now() + retryAfter);
-      throw new RateLimitError("TRN rate limit (1015).", retryAfter);
+      throw new RateLimitError("Stats API rate limit (1015).", retryAfter);
     }
-    throw new Error(`TRN error ${response.status}: ${text.slice(0, 120)}`);
+    throw new Error(`Stats API error ${response.status}: ${text.slice(0, 120)}`);
   }
 
   try {
@@ -115,9 +120,9 @@ async function fetchJson(url: string): Promise<unknown> {
     if (text.includes("error code: 1015")) {
       const retryAfter = 60_000;
       globalRateLimitUntil = Math.max(globalRateLimitUntil, Date.now() + retryAfter);
-      throw new RateLimitError("TRN rate limit (1015).", retryAfter);
+      throw new RateLimitError("Stats API rate limit (1015).", retryAfter);
     }
-    throw new Error("TRN response was not valid JSON.");
+    throw new Error("Stats API response was not valid JSON.");
   }
 }
 
@@ -126,16 +131,16 @@ export function isRateLimitError(error: unknown): error is RateLimitError {
 }
 
 export async function fetchPlayerStats(platform: Platform, gamertag: string): Promise<unknown> {
-  const url = `${BASE_URL}/${encodeURIComponent(platform)}/${encodeURIComponent(gamertag)}`;
+  const url = `${getBaseUrl()}/${encodeURIComponent(platform)}/${encodeURIComponent(gamertag)}`;
   return fetchJson(url);
 }
 
 export async function fetchPlayerSessions(platform: Platform, gamertag: string): Promise<unknown> {
-  const url = `${BASE_URL}/${encodeURIComponent(platform)}/${encodeURIComponent(gamertag)}/sessions`;
+  const url = `${getBaseUrl()}/${encodeURIComponent(platform)}/${encodeURIComponent(gamertag)}/sessions`;
   return fetchJson(url);
 }
 
-export async function getTrnStatus(
+export async function getStatsApiStatus(
   platform: Platform,
   gamertag: string,
   options: { force?: boolean } = {}
@@ -157,7 +162,7 @@ export async function getTrnStatus(
     };
   }
 
-  const url = `${BASE_URL}/${encodeURIComponent(platform)}/${encodeURIComponent(gamertag)}`;
+  const url = `${getBaseUrl()}/${encodeURIComponent(platform)}/${encodeURIComponent(gamertag)}`;
   try {
     const response = await fetch(url, { headers: buildHeaders() });
     const headers = Object.fromEntries(response.headers.entries());
@@ -165,7 +170,7 @@ export async function getTrnStatus(
     return {
       ok: response.ok,
       status: response.status,
-      error: response.ok ? null : `TRN error ${response.status}`,
+      error: response.ok ? null : `Stats API error ${response.status}`,
       retryAfterMs: retryAfter ?? null,
       headers
     };
