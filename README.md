@@ -46,6 +46,8 @@ npm install
 
 2) Configure the player stats API:
 
+This project does not bundle any Rocket League APIs. You must supply your own player stats API credentials and endpoint, obtained through official, authorized channels in compliance with Psyonix/Epic policies.
+
 You can set the API key and base URL in System Admin > API settings, or via a `.env` file at the repo root (see `.env.example`).
 
 3) Run the dev servers:
