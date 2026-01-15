@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.3
+- Removed the default player stats API endpoint; base URL must be configured by an admin.
+- Clarified System Admin messaging when the base URL is missing.
+- Updated favicon asset.
+
+## 0.2.2
+- Added configurable player stats API base URL in System Admin.
+- Updated docs/title to use generic player stats API wording.
+- Added API base URL support in server startup/config tooling.
+
 ## 0.2.1
 - Added AI agent settings, audit logging, and cost estimates for coach calls.
 - Added manual-mode session creation flow and manual-only controls.
