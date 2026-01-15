@@ -66,6 +66,25 @@ npm run dev
 - Click "Refresh now" to trigger an immediate server-side fetch without starting another polling loop.
 - Stop or end a session to retain the stored history.
 
+## User roles and first admin setup
+
+Roles:
+- **Admin**: System Admin access, user approvals, and configuration (API keys, base URL, AI settings).
+- **User**: Create/manage sessions and view team dashboards (subject to approvals).
+
+Bootstrap the first admin (only if no users exist yet):
+1) Set these environment variables before starting the server:
+
+```bash
+ADMIN_USERNAME="your_admin_username"
+ADMIN_EMAIL="you@example.com"
+ADMIN_PASSWORD="your_password"
+```
+
+2) Start the server. The first admin account will be created automatically.
+
+After that, admins can approve or manage users from User Admin.
+
 ## AI Coach (optional)
 
 Enable AI Coach by setting OpenAI credentials:
