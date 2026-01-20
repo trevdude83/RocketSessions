@@ -25,9 +25,11 @@ function computeLosses(wins: number | null, matchesPlayed: number | null): numbe
 }
 
 const teamIdArg = toNumber(process.argv[2]);
-const rows = teamIdArg !== null
-  ? db.prepare("SELECT id, derivedTeamJson, deltasJson FROM session_team_stats WHERE teamId = ?").all(teamIdArg)
-  : db.prepare("SELECT id, derivedTeamJson, deltasJson FROM session_team_stats").all();
+const rows = (
+  teamIdArg !== null
+    ? db.prepare("SELECT id, derivedTeamJson, deltasJson FROM session_team_stats WHERE teamId = ?").all(teamIdArg)
+    : db.prepare("SELECT id, derivedTeamJson, deltasJson FROM session_team_stats").all()
+) as { id: number; derivedTeamJson: string | null; deltasJson: string | null }[];
 
 const update = db.prepare(
   "UPDATE session_team_stats SET derivedTeamJson = ?, deltasJson = ? WHERE id = ?"

@@ -1,4 +1,4 @@
-import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, PollingLogEntry, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, GameStatRow } from "./types";
+import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, PollingLogEntry, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, GameStatRow, ScoreboardDevice, ScoreboardIngest } from "./types";
 
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -368,16 +368,16 @@ export async function listCoachReports(
   return handleJson(res);
 }
 
-export async function setOpenAiKey(apiKey: string, model?: string): Promise<void> {
+export async function setOpenAiKey(apiKey: string, model?: string, visionModel?: string): Promise<void> {
   const res = await apiFetch("/api/settings/openai-key", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey, model })
+    body: JSON.stringify({ apiKey, model, visionModel })
   });
   await handleJson(res);
 }
 
-export async function getOpenAiStatus(): Promise<{ configured: boolean; model: string | null }> {
+export async function getOpenAiStatus(): Promise<{ configured: boolean; model: string | null; visionModel: string | null }> {
   const res = await apiFetch("/api/settings/openai-key");
   return handleJson(res);
 }
@@ -505,5 +505,52 @@ export async function setDefaultTeamCoachPrompt(prompt: string): Promise<void> {
 
 export async function getTeamCoachPacket(teamId: number): Promise<{ prompt: string | null; packet: unknown }> {
   const res = await apiFetch(`/api/teams/${teamId}/coach/packet`);
+  return handleJson(res);
+}
+
+export async function listScoreboardDevices(): Promise<ScoreboardDevice[]> {
+  const res = await apiFetch("/api/v1/scoreboard/admin/devices");
+  return handleJson(res);
+}
+
+export async function setScoreboardDeviceEnabled(deviceId: number, enabled: boolean): Promise<{ ok: boolean; deviceId: number; enabled: boolean }> {
+  const res = await apiFetch(`/api/v1/scoreboard/admin/devices/${deviceId}/enable`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled })
+  });
+  return handleJson(res);
+}
+
+export async function registerScoreboardDevice(name?: string): Promise<{ deviceId: number; deviceKey: string; pollUrl: string; uploadUrl: string }> {
+  const res = await apiFetch("/api/v1/scoreboard/devices/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+  return handleJson(res);
+}
+
+export async function listScoreboardIngests(limit = 50): Promise<ScoreboardIngest[]> {
+  const res = await apiFetch(`/api/v1/scoreboard/admin/ingests?limit=${limit}`);
+  return handleJson(res);
+}
+
+export async function processScoreboardIngest(ingestId: number): Promise<{ ingestId: number; status: string; matchId?: number; error?: string }> {
+  const res = await apiFetch(`/api/v1/scoreboard/admin/ingests/${ingestId}/process`, { method: "POST" });
+  return handleJson(res);
+}
+
+export async function getScoreboardSettings(): Promise<{ retentionDays: number | null }> {
+  const res = await apiFetch("/api/v1/scoreboard/admin/settings");
+  return handleJson(res);
+}
+
+export async function setScoreboardSettings(payload: { retentionDays: number | null }): Promise<{ ok: boolean; retentionDays: number | null }> {
+  const res = await apiFetch("/api/v1/scoreboard/admin/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
   return handleJson(res);
 }

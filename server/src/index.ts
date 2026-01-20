@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import sessionsRouter from "./routes/sessions.js";
 import authRouter from "./routes/auth.js";
+import scoreboardRouter from "./routes/scoreboard.js";
 import { db, getSetting } from "./db.js";
 import fs from "fs";
 import path from "path";
@@ -15,6 +16,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(attachAuth);
 app.use("/api", authRouter);
 app.use("/api", sessionsRouter);
+app.use("/api/v1/scoreboard", scoreboardRouter);
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
@@ -39,6 +41,7 @@ app.listen(port, () => {
   const savedBaseUrl = getSetting("PLAYER_STATS_API_BASE_URL");
   const savedOpenAi = getSetting("OPENAI_API_KEY");
   const savedModel = getSetting("OPENAI_MODEL");
+  const savedVisionModel = getSetting("OPENAI_VISION_MODEL");
   if (!key || !savedBaseUrl || !savedOpenAi || !savedModel) {
     const settingsPath = path.join(path.dirname(db.name), "app-settings.json");
     if (fs.existsSync(settingsPath)) {
@@ -49,6 +52,7 @@ app.listen(port, () => {
           PLAYER_STATS_API_BASE_URL?: string;
           OPENAI_API_KEY?: string;
           OPENAI_MODEL?: string;
+          OPENAI_VISION_MODEL?: string;
         };
         key = key || parsed.PLAYER_STATS_API_KEY || parsed.TRN_API_KEY;
         if (!process.env.PLAYER_STATS_API_BASE_URL && parsed.PLAYER_STATS_API_BASE_URL) {
@@ -59,6 +63,9 @@ app.listen(port, () => {
         }
         if (!process.env.OPENAI_MODEL && parsed.OPENAI_MODEL) {
           process.env.OPENAI_MODEL = parsed.OPENAI_MODEL;
+        }
+        if (!process.env.OPENAI_VISION_MODEL && parsed.OPENAI_VISION_MODEL) {
+          process.env.OPENAI_VISION_MODEL = parsed.OPENAI_VISION_MODEL;
         }
       } catch {}
     }
@@ -71,6 +78,9 @@ app.listen(port, () => {
   }
   if (savedModel && !process.env.OPENAI_MODEL) {
     process.env.OPENAI_MODEL = savedModel;
+  }
+  if (savedVisionModel && !process.env.OPENAI_VISION_MODEL) {
+    process.env.OPENAI_VISION_MODEL = savedVisionModel;
   }
   if (savedBaseUrl && !process.env.PLAYER_STATS_API_BASE_URL) {
     process.env.PLAYER_STATS_API_BASE_URL = savedBaseUrl;

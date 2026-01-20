@@ -137,6 +137,7 @@ export default function UserAdmin() {
                 <div className="menu-panel">
                   <ThemeToggle />
                   <Link className="menu-link" to="/admin">System admin</Link>
+                  <Link className="menu-link" to="/admin/scoreboard">ScoreboardCam</Link>
                   <SignOutButton />
                 </div>
               </details>

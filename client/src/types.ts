@@ -236,3 +236,25 @@ export interface AuthUser {
   role: "admin" | "user";
   status: "pending" | "active" | "disabled";
 }
+
+export interface ScoreboardDevice {
+  id: number;
+  name: string | null;
+  deviceKeyHash: string;
+  createdAt: string;
+  lastSeenAt: string | null;
+  isEnabled: number;
+}
+
+export interface ScoreboardIngest {
+  id: number;
+  deviceId: number;
+  receivedAt: string;
+  status: "received" | "extracting" | "extracted" | "failed";
+  errorMessage: string | null;
+  sessionId: number | null;
+  teamId: number | null;
+  focusPlaylistId: number | null;
+  dedupeKey: string | null;
+  matchId: number | null;
+}

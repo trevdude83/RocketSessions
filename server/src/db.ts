@@ -2,7 +2,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { PlayerInput, PlayerRow, SessionRow, SnapshotRow, TeamRow, SessionTeamStatsRow } from "./types.js";
+import { MatchRow, PlayerInput, PlayerRow, ScoreboardDeviceRow, ScoreboardIngestRow, SessionRow, SnapshotRow, TeamRow, SessionTeamStatsRow } from "./types.js";
 
 const baseDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const serverDataDir = path.join(baseDir, "data");
@@ -174,6 +174,73 @@ db.exec(`
     sharedByUserId INTEGER,
     createdAt TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS scoreboard_devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    deviceKeyHash TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    lastSeenAt TEXT,
+    isEnabled INTEGER NOT NULL DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS scoreboard_ingests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    deviceId INTEGER NOT NULL,
+    receivedAt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    errorMessage TEXT,
+    sessionId INTEGER,
+    teamId INTEGER,
+    focusPlaylistId INTEGER,
+    dedupeKey TEXT,
+    matchId INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS scoreboard_ingest_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingestId INTEGER NOT NULL,
+    imagePath TEXT NOT NULL,
+    createdAt TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sessionId INTEGER,
+    teamId INTEGER,
+    source TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    rawExtractionJson TEXT NOT NULL,
+    derivedMatchJson TEXT NOT NULL,
+    extractionConfidence REAL,
+    dedupeKey TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS match_players (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    matchId INTEGER NOT NULL,
+    playerId INTEGER,
+    gamertag TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    goals INTEGER,
+    assists INTEGER,
+    saves INTEGER,
+    shots INTEGER,
+    score INTEGER,
+    isWinner INTEGER,
+    nameMatchConfidence REAL
+  );
+`);
+
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_scoreboard_devices_key ON scoreboard_devices(deviceKeyHash);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_scoreboard_ingests_dedupe ON scoreboard_ingests(dedupeKey);
+  CREATE INDEX IF NOT EXISTS idx_scoreboard_ingests_device ON scoreboard_ingests(deviceId);
+  CREATE INDEX IF NOT EXISTS idx_scoreboard_ingests_session ON scoreboard_ingests(sessionId);
+  CREATE INDEX IF NOT EXISTS idx_scoreboard_ingest_images_ingest ON scoreboard_ingest_images(ingestId);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_dedupe ON matches(dedupeKey);
+  CREATE INDEX IF NOT EXISTS idx_matches_session ON matches(sessionId);
+  CREATE INDEX IF NOT EXISTS idx_match_players_match ON match_players(matchId);
 `);
 
 try {
@@ -842,6 +909,198 @@ export function getLatestAvatarUrlByGamertag(gamertag: string): string | null {
   } catch {
     return null;
   }
+}
+
+export function createScoreboardDevice(
+  name: string | null,
+  deviceKeyHash: string
+): ScoreboardDeviceRow {
+  const createdAt = new Date().toISOString();
+  const result = db
+    .prepare("INSERT INTO scoreboard_devices (name, deviceKeyHash, createdAt, isEnabled) VALUES (?, ?, ?, 1)")
+    .run(name, deviceKeyHash, createdAt);
+  return {
+    id: Number(result.lastInsertRowid),
+    name,
+    deviceKeyHash,
+    createdAt,
+    lastSeenAt: null,
+    isEnabled: 1
+  };
+}
+
+export function getScoreboardDevice(deviceId: number): ScoreboardDeviceRow | undefined {
+  return db.prepare("SELECT * FROM scoreboard_devices WHERE id = ?").get(deviceId) as ScoreboardDeviceRow | undefined;
+}
+
+export function getScoreboardDeviceByHash(deviceKeyHash: string): ScoreboardDeviceRow | undefined {
+  return db
+    .prepare("SELECT * FROM scoreboard_devices WHERE deviceKeyHash = ?")
+    .get(deviceKeyHash) as ScoreboardDeviceRow | undefined;
+}
+
+export function listScoreboardDevices(): ScoreboardDeviceRow[] {
+  return db.prepare("SELECT * FROM scoreboard_devices ORDER BY createdAt DESC").all() as ScoreboardDeviceRow[];
+}
+
+export function updateScoreboardDeviceSeen(deviceId: number, seenAt: string): void {
+  db.prepare("UPDATE scoreboard_devices SET lastSeenAt = ? WHERE id = ?").run(seenAt, deviceId);
+}
+
+export function setScoreboardDeviceEnabled(deviceId: number, isEnabled: boolean): void {
+  db.prepare("UPDATE scoreboard_devices SET isEnabled = ? WHERE id = ?").run(isEnabled ? 1 : 0, deviceId);
+}
+
+export function createScoreboardIngest(input: {
+  deviceId: number;
+  receivedAt: string;
+  status: ScoreboardIngestRow["status"];
+  errorMessage: string | null;
+  sessionId: number | null;
+  teamId: number | null;
+  focusPlaylistId: number | null;
+  dedupeKey: string | null;
+  matchId: number | null;
+}): ScoreboardIngestRow {
+  const result = db
+    .prepare(
+      "INSERT INTO scoreboard_ingests (deviceId, receivedAt, status, errorMessage, sessionId, teamId, focusPlaylistId, dedupeKey, matchId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(
+      input.deviceId,
+      input.receivedAt,
+      input.status,
+      input.errorMessage,
+      input.sessionId,
+      input.teamId,
+      input.focusPlaylistId,
+      input.dedupeKey,
+      input.matchId
+    );
+  return {
+    id: Number(result.lastInsertRowid),
+    ...input
+  };
+}
+
+export function updateScoreboardIngest(
+  ingestId: number,
+  patch: Partial<Pick<ScoreboardIngestRow, "status" | "errorMessage" | "sessionId" | "teamId" | "focusPlaylistId" | "dedupeKey" | "matchId">>
+): void {
+  const current = getScoreboardIngest(ingestId);
+  if (!current) return;
+  const next = { ...current, ...patch };
+  db.prepare(
+    "UPDATE scoreboard_ingests SET status = ?, errorMessage = ?, sessionId = ?, teamId = ?, focusPlaylistId = ?, dedupeKey = ?, matchId = ? WHERE id = ?"
+  ).run(
+    next.status,
+    next.errorMessage,
+    next.sessionId,
+    next.teamId,
+    next.focusPlaylistId,
+    next.dedupeKey,
+    next.matchId,
+    ingestId
+  );
+}
+
+export function getScoreboardIngest(ingestId: number): ScoreboardIngestRow | undefined {
+  return db.prepare("SELECT * FROM scoreboard_ingests WHERE id = ?").get(ingestId) as ScoreboardIngestRow | undefined;
+}
+
+export function listScoreboardIngests(limit = 50): ScoreboardIngestRow[] {
+  return db
+    .prepare("SELECT * FROM scoreboard_ingests ORDER BY receivedAt DESC LIMIT ?")
+    .all(limit) as ScoreboardIngestRow[];
+}
+
+export function getLatestScoreboardIngestForDevice(deviceId: number): ScoreboardIngestRow | undefined {
+  return db
+    .prepare("SELECT * FROM scoreboard_ingests WHERE deviceId = ? ORDER BY receivedAt DESC LIMIT 1")
+    .get(deviceId) as ScoreboardIngestRow | undefined;
+}
+
+export function getScoreboardIngestByDedupe(dedupeKey: string): ScoreboardIngestRow | undefined {
+  return db
+    .prepare("SELECT * FROM scoreboard_ingests WHERE dedupeKey = ?")
+    .get(dedupeKey) as ScoreboardIngestRow | undefined;
+}
+
+export function insertScoreboardIngestImage(ingestId: number, imagePath: string): void {
+  const createdAt = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO scoreboard_ingest_images (ingestId, imagePath, createdAt) VALUES (?, ?, ?)"
+  ).run(ingestId, imagePath, createdAt);
+}
+
+export function listScoreboardIngestImages(ingestId: number): { id: number; imagePath: string; createdAt: string }[] {
+  return db
+    .prepare("SELECT id, imagePath, createdAt FROM scoreboard_ingest_images WHERE ingestId = ? ORDER BY id ASC")
+    .all(ingestId) as { id: number; imagePath: string; createdAt: string }[];
+}
+
+export function findMatchByDedupe(dedupeKey: string): MatchRow | undefined {
+  return db.prepare("SELECT * FROM matches WHERE dedupeKey = ?").get(dedupeKey) as MatchRow | undefined;
+}
+
+export function insertMatch(input: {
+  sessionId: number | null;
+  teamId: number | null;
+  source: string;
+  createdAt: string;
+  rawExtractionJson: string;
+  derivedMatchJson: string;
+  extractionConfidence: number | null;
+  dedupeKey: string | null;
+}): MatchRow {
+  const result = db
+    .prepare(
+      "INSERT INTO matches (sessionId, teamId, source, createdAt, rawExtractionJson, derivedMatchJson, extractionConfidence, dedupeKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(
+      input.sessionId,
+      input.teamId,
+      input.source,
+      input.createdAt,
+      input.rawExtractionJson,
+      input.derivedMatchJson,
+      input.extractionConfidence,
+      input.dedupeKey
+    );
+  return {
+    id: Number(result.lastInsertRowid),
+    ...input
+  };
+}
+
+export function insertMatchPlayer(input: {
+  matchId: number;
+  playerId: number | null;
+  gamertag: string;
+  platform: string;
+  goals: number | null;
+  assists: number | null;
+  saves: number | null;
+  shots: number | null;
+  score: number | null;
+  isWinner: boolean | null;
+  nameMatchConfidence: number | null;
+}): void {
+  db.prepare(
+    "INSERT INTO match_players (matchId, playerId, gamertag, platform, goals, assists, saves, shots, score, isWinner, nameMatchConfidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    input.matchId,
+    input.playerId,
+    input.gamertag,
+    input.platform,
+    input.goals,
+    input.assists,
+    input.saves,
+    input.shots,
+    input.score,
+    input.isWinner === null ? null : input.isWinner ? 1 : 0,
+    input.nameMatchConfidence
+  );
 }
 
 export function createUser(

@@ -71,6 +71,7 @@ export default function SystemAdmin() {
 
   const [openAiKey, setOpenAiKeyValue] = useState("");
   const [openAiModel, setOpenAiModel] = useState("gpt-4o-mini");
+  const [openAiVisionModel, setOpenAiVisionModel] = useState("");
   const [openAiStatus, setOpenAiStatus] = useState<boolean | null>(null);
   const [savingOpenAi, setSavingOpenAi] = useState(false);
   const [openAiMessage, setOpenAiMessage] = useState<string | null>(null);
@@ -167,6 +168,7 @@ export default function SystemAdmin() {
     void loadCoachAudit();
   }, []);
 
+
   useEffect(() => {
     if (!pollingAutoRefresh) return;
     const interval = setInterval(() => {
@@ -183,6 +185,7 @@ export default function SystemAdmin() {
       .then((result) => {
         setOpenAiStatus(result.configured);
         if (result.model) setOpenAiModel(result.model);
+        if (result.visionModel) setOpenAiVisionModel(result.visionModel);
       })
       .catch(() => setOpenAiStatus(false));
     getOpenAiModels()
@@ -279,10 +282,11 @@ export default function SystemAdmin() {
     setError(null);
     setOpenAiMessage(null);
     try {
-      await setOpenAiKey(openAiKey, openAiModel);
+      await setOpenAiKey(openAiKey, openAiModel, openAiVisionModel);
       const status = await getOpenAiStatus();
       setOpenAiStatus(status.configured);
       if (status.model) setOpenAiModel(status.model);
+      if (status.visionModel) setOpenAiVisionModel(status.visionModel);
       setOpenAiKeyValue("");
       setOpenAiMessage("OpenAI key saved.");
     } catch (err: any) {
@@ -496,6 +500,7 @@ export default function SystemAdmin() {
     return list;
   }, [openAiModels, openAiModel]);
 
+
   return (
     <div className="app">
       <ImpersonationBanner />
@@ -521,6 +526,7 @@ export default function SystemAdmin() {
                 <div className="menu-panel">
                   <ThemeToggle />
                   <Link className="menu-link" to="/admin/users">User admin</Link>
+                  <Link className="menu-link" to="/admin/scoreboard">ScoreboardCam</Link>
                   <SignOutButton />
                 </div>
               </details>
@@ -677,6 +683,16 @@ export default function SystemAdmin() {
                       <option key={model} value={model} />
                     ))}
                   </datalist>
+                </label>
+                <label>
+                  OpenAI vision model (optional)
+                  <input
+                    type="text"
+                    list="openai-models"
+                    value={openAiVisionModel}
+                    placeholder="Leave blank to use OpenAI model"
+                    onChange={(e) => setOpenAiVisionModel(e.target.value)}
+                  />
                 </label>
                 <div className="actions">
                   <button onClick={handleSaveOpenAi} disabled={savingOpenAi || openAiKey.trim().length === 0}>

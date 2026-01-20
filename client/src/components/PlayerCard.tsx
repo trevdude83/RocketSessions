@@ -19,6 +19,13 @@ function formatDelta(value: number | null | undefined) {
   return value > 0 ? `+${fixed}` : fixed;
 }
 
+function deltaClass(value: number | null | undefined) {
+  if (typeof value !== "number") return "";
+  if (value < 0) return "delta-negative";
+  if (value > 0) return "delta-positive";
+  return "";
+}
+
 function formatRankLabel(metrics: SnapshotSummary["derived"] | null | undefined): string | null {
   const tierIndex = metrics?.rankTierIndex;
   if (typeof tierIndex === "number" && Number.isFinite(tierIndex)) {
@@ -58,37 +65,37 @@ export default function PlayerCard({ player, baseline, latest, delta }: Props) {
         <div>
           <span>Wins</span>
           <strong>{formatValue(latestMetrics?.wins)}</strong>
-          <small>{formatDelta(delta?.wins)}</small>
+          <small className={deltaClass(delta?.wins)}>{formatDelta(delta?.wins)}</small>
         </div>
         <div>
           <span>Goals</span>
           <strong>{formatValue(latestMetrics?.goals)}</strong>
-          <small>{formatDelta(delta?.goals)}</small>
+          <small className={deltaClass(delta?.goals)}>{formatDelta(delta?.goals)}</small>
         </div>
         <div>
           <span>Assists</span>
           <strong>{formatValue(latestMetrics?.assists)}</strong>
-          <small>{formatDelta(delta?.assists)}</small>
+          <small className={deltaClass(delta?.assists)}>{formatDelta(delta?.assists)}</small>
         </div>
         <div>
           <span>Saves</span>
           <strong>{formatValue(latestMetrics?.saves)}</strong>
-          <small>{formatDelta(delta?.saves)}</small>
+          <small className={deltaClass(delta?.saves)}>{formatDelta(delta?.saves)}</small>
         </div>
         <div>
           <span>Shots</span>
           <strong>{formatValue(latestMetrics?.shots)}</strong>
-          <small>{formatDelta(delta?.shots)}</small>
+          <small className={deltaClass(delta?.shots)}>{formatDelta(delta?.shots)}</small>
         </div>
         <div>
           <span>Goal/Shot</span>
           <strong>{formatValue(latestMetrics?.goalShotRatio)}</strong>
-          <small>{formatDelta(delta?.goalShotRatio)}</small>
+          <small className={deltaClass(delta?.goalShotRatio)}>{formatDelta(delta?.goalShotRatio)}</small>
         </div>
         <div>
           <span>MMR</span>
           <strong>{formatValue(latestMetrics?.mmr)}</strong>
-          <small>{formatDelta(delta?.mmr)}</small>
+          <small className={deltaClass(delta?.mmr)}>{formatDelta(delta?.mmr)}</small>
         </div>
       </div>
       {rankLabel && (

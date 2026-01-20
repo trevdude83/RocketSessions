@@ -218,13 +218,13 @@ export async function generateCoachReport(
   const input = [
     { role: "system", content: prompt },
     { role: "user", content: JSON.stringify(packet) }
-  ];
+  ] as any;
 
   const response = await client.responses.create({
     model,
     input,
     text: { format: { type: "json_schema", name: "coach_report", schema: jsonSchema.schema, strict: true } }
-  });
+  } as any);
 
   let output = response.output_text?.trim() ?? "";
   let parsed = safeParseReport(output);
@@ -237,7 +237,7 @@ export async function generateCoachReport(
         { role: "user", content: fixPrompt },
         { role: "user", content: output }
       ]
-    });
+    } as any);
     output = fixResponse.output_text?.trim() ?? "";
     parsed = safeParseReport(output);
   }

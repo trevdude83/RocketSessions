@@ -128,9 +128,15 @@ export default function AdvancedSession() {
       return;
     }
 
-    const matchIndexValue = Number(manualMatchIndex);
-    const matchIndex =
-      Number.isFinite(matchIndexValue) && matchIndexValue >= 0 ? matchIndexValue : undefined;
+    const trimmedMatchIndex = manualMatchIndex.trim();
+    let matchIndex: number | undefined;
+    if (trimmedMatchIndex.length > 0) {
+      const matchIndexValue = Number(trimmedMatchIndex);
+      if (!Number.isFinite(matchIndexValue) || matchIndexValue < 1) {
+        throw new Error("Match number must be 1 or higher.");
+      }
+      matchIndex = matchIndexValue;
+    }
 
     setManualSubmitting(true);
     try {
@@ -243,11 +249,11 @@ export default function AdvancedSession() {
           </p>
           <div className="form">
             <label>
-              Match index (optional)
+              Match number (optional)
               <input
                 type="number"
-                min={0}
-                placeholder="0 for baseline, blank for next match"
+                min={1}
+                placeholder="Leave blank for next match"
                 value={manualMatchIndex}
                 onChange={(e) => setManualMatchIndex(e.target.value)}
               />

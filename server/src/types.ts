@@ -69,6 +69,40 @@ export interface SnapshotRow {
   derivedJson: string;
 }
 
+export interface ScoreboardDeviceRow {
+  id: number;
+  name: string | null;
+  deviceKeyHash: string;
+  createdAt: string;
+  lastSeenAt: string | null;
+  isEnabled: number;
+}
+
+export interface ScoreboardIngestRow {
+  id: number;
+  deviceId: number;
+  receivedAt: string;
+  status: "received" | "extracting" | "extracted" | "failed";
+  errorMessage: string | null;
+  sessionId: number | null;
+  teamId: number | null;
+  focusPlaylistId: number | null;
+  dedupeKey: string | null;
+  matchId: number | null;
+}
+
+export interface MatchRow {
+  id: number;
+  sessionId: number | null;
+  teamId: number | null;
+  source: string;
+  createdAt: string;
+  rawExtractionJson: string;
+  derivedMatchJson: string;
+  extractionConfidence: number | null;
+  dedupeKey: string | null;
+}
+
 
 export interface DerivedPlaylistStats {
   playlistId: number;

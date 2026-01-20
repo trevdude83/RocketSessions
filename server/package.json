@@ -5,10 +5,13 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test:scoreboard": "node --import tsx src/scoreboard/scoreboard.test.ts",
+    "cleanup:scoreboards": "node --import tsx src/scoreboard/cleanupScoreboards.ts"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
+    "multer": "^2.0.0",
     "express": "^4.19.2",
     "trn-rocket-league": "^2.0.1",
     "openai": "^4.56.0",
@@ -16,7 +19,9 @@
     "dotenv": "^16.4.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
     "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
     "@types/node": "^20.11.30",
     "tsx": "^4.7.1",
     "typescript": "^5.4.2"

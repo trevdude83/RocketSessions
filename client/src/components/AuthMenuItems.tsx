@@ -13,6 +13,7 @@ export default function AuthMenuItems({ showAdminLink = false }: { showAdminLink
         <>
           <Link className="menu-link" to="/admin">System admin</Link>
           <Link className="menu-link" to="/admin/users">User admin</Link>
+          <Link className="menu-link" to="/admin/scoreboard">ScoreboardCam</Link>
         </>
       )}
       <SignOutButton />

@@ -1254,8 +1254,8 @@ router.get("/sessions/:id/timeseries", (req, res) => {
       return { t: snapshot.t, v: null };
     }
 
-    const value = (derived as Record<string, number | null>)[metric] ?? null;
-    const baselineValue = (baselineDerived as Record<string, number | null> | null)?.[metric] ?? null;
+    const value = (derived as unknown as Record<string, number | null>)[metric] ?? null;
+    const baselineValue = (baselineDerived as unknown as Record<string, number | null> | null)?.[metric] ?? null;
 
     if (metric === "rankPoints") {
       return { t: snapshot.t, v: typeof value === "number" ? value : null };
@@ -1617,7 +1617,11 @@ router.get("/settings/api-base-url", requireAdmin, (req, res) => {
 });
 
 router.post("/settings/openai-key", requireAdmin, (req, res) => {
-  const { apiKey, model } = req.body as { apiKey?: string; model?: string };
+  const { apiKey, model, visionModel } = req.body as {
+    apiKey?: string;
+    model?: string;
+    visionModel?: string;
+  };
   if (!apiKey || typeof apiKey !== "string") {
     return res.status(400).json({ error: "Missing apiKey" });
   }
@@ -1627,6 +1631,10 @@ router.post("/settings/openai-key", requireAdmin, (req, res) => {
   if (typeof model === "string" && model.trim().length > 0) {
     process.env.OPENAI_MODEL = model.trim();
     setSetting("OPENAI_MODEL", model.trim());
+  }
+  if (typeof visionModel === "string" && visionModel.trim().length > 0) {
+    process.env.OPENAI_VISION_MODEL = visionModel.trim();
+    setSetting("OPENAI_VISION_MODEL", visionModel.trim());
   }
   const stored = getSetting("OPENAI_API_KEY") || trimmed;
   if (!stored) {
@@ -1639,13 +1647,17 @@ router.post("/settings/openai-key", requireAdmin, (req, res) => {
 router.get("/settings/openai-key", requireAdmin, (req, res) => {
   const value = process.env.OPENAI_API_KEY || getSetting("OPENAI_API_KEY");
   const model = process.env.OPENAI_MODEL || getSetting("OPENAI_MODEL") || null;
+  const visionModel = process.env.OPENAI_VISION_MODEL || getSetting("OPENAI_VISION_MODEL") || null;
   if (value && !process.env.OPENAI_API_KEY) {
     process.env.OPENAI_API_KEY = value;
   }
   if (model && !process.env.OPENAI_MODEL) {
     process.env.OPENAI_MODEL = model;
   }
-  res.json({ configured: Boolean(value), model });
+  if (visionModel && !process.env.OPENAI_VISION_MODEL) {
+    process.env.OPENAI_VISION_MODEL = visionModel;
+  }
+  res.json({ configured: Boolean(value), model, visionModel });
 });
 
 router.get("/settings/openai-models", requireAdmin, (req, res) => {

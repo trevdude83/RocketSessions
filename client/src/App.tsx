@@ -9,6 +9,7 @@ import Login from "./components/Login";
 import Register from "./components/Register";
 import Pending from "./components/Pending";
 import UserAdmin from "./components/UserAdmin";
+import ScoreboardAdmin from "./components/ScoreboardAdmin";
 import { deleteSession, listSessions, listTeams } from "./api";
 import { Session, Team } from "./types";
 import TeamHistory from "./components/TeamHistory";
@@ -37,6 +38,7 @@ export default function App() {
             <Route element={<RequireAdmin />}>
               <Route path="/admin" element={<SystemAdmin />} />
               <Route path="/admin/users" element={<UserAdmin />} />
+              <Route path="/admin/scoreboard" element={<ScoreboardAdmin />} />
             </Route>
           </Route>
         </Routes>

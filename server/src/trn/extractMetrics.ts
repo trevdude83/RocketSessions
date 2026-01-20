@@ -227,6 +227,7 @@ function extractFromLegacyProfile(payload: any): Partial<DerivedMetrics> | null 
   let rankTierIndex: number | null = null;
   let rankDivisionIndex: number | null = null;
   let rankPoints: number | null = null;
+  let rankIconUrl: string | null = null;
   const avatarUrl =
     typeof payload?.avatarURL === "string"
       ? payload.avatarURL

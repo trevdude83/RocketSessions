@@ -113,6 +113,31 @@ Prompt tuning:
 - The override replaces the default prompt entirely. Clearing the override reverts to the default.
 - You can also update the stored default prompt for each coach type from the same screen.
 
+## ScoreboardCam integration (optional)
+
+RocketSessions can ingest end-of-match scoreboard images captured by a Raspberry Pi (or any device) and convert them into structured match data.
+
+How it works:
+- Register a device to receive a one-time device key.
+- The device polls for the active session context.
+- The device uploads 1–3 scoreboard images after each match.
+- The server extracts stats with OpenAI Vision and adds a match to the active session.
+
+Key endpoints:
+- `POST /api/v1/scoreboard/devices/register` → returns `{ deviceId, deviceKey, pollUrl, uploadUrl }`
+- `GET /api/v1/scoreboard/devices/:deviceId/context` (Authorization: `Bearer <deviceKey>`)
+- `GET /api/v1/scoreboard/devices/:deviceId/status` (Authorization: `Bearer <deviceKey>`)
+- `POST /api/v1/scoreboard/ingest` (Authorization: `Bearer <deviceKey>`, multipart `images[]`)
+- `POST /api/v1/scoreboard/ingest/:ingestId/process` (Authorization: `Bearer <deviceKey>`)
+
+Notes:
+- The Pi only uploads images. All extraction, mapping, and aggregation happen server-side.
+- Dedupe is applied so repeated captures of the same scoreboard do not create duplicate matches.
+- If OpenAI is not configured, the extractor returns a stub payload and the ingest will fail gracefully.
+- Optional: set `OPENAI_VISION_MODEL` if you want a different model for images.
+- You can view devices, ingests, and retention settings in System Admin > ScoreboardCam.
+- Cleanup: run `npm --prefix server run cleanup:scoreboards` to delete stored ingest images older than the configured retention window.
+
 ## Demo
 
 Create a demo session quickly:
