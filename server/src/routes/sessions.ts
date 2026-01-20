@@ -1190,8 +1190,8 @@ router.get("/sessions/:id/timeseries", (req, res) => {
   const baselineDerived = parseJson<DerivedMetrics>(baseline?.derivedJson || "");
 
   const latestByMatchIndex = new Map<number, { t: number; derived: DerivedMetrics | null }>();
-  const hasPositiveMatchIndex = snapshots.some((snapshot) => (snapshot.matchIndex ?? 0) > 0);
-  if (hasPositiveMatchIndex) {
+  const hasMatchIndex = snapshots.some((snapshot) => snapshot.matchIndex !== null && snapshot.matchIndex !== undefined);
+  if (hasMatchIndex) {
     snapshots.forEach((snapshot) => {
       if (snapshot.matchIndex === null || snapshot.matchIndex === undefined) return;
       const derived = parseJson<DerivedMetrics>(snapshot.derivedJson);
@@ -1486,7 +1486,7 @@ router.post("/sessions/:id/snapshots/manual", (req, res) => {
   const capturedAt = new Date().toISOString();
   const requestedMatchIndex = Number(req.body?.matchIndex);
   const matchIndex =
-    Number.isFinite(requestedMatchIndex) && requestedMatchIndex >= 0
+    Number.isFinite(requestedMatchIndex) && requestedMatchIndex > 0
       ? requestedMatchIndex
       : session.matchIndex + 1;
 
