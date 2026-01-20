@@ -15,8 +15,8 @@ const port = Number(process.env.PORT || 3001);
 app.use(express.json({ limit: "1mb" }));
 app.use(attachAuth);
 app.use("/api", authRouter);
-app.use("/api", sessionsRouter);
 app.use("/api/v1/scoreboard", scoreboardRouter);
+app.use("/api", sessionsRouter);
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
