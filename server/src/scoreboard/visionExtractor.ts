@@ -24,6 +24,11 @@ const extractionSchema = z.object({
   })
 });
 
+const columnSchema = z.object({
+  blue: z.array(z.number().nullable()),
+  orange: z.array(z.number().nullable())
+});
+
 export type ScoreboardExtractionResult = {
   extraction: ScoreboardExtraction;
   confidence: number | null;
@@ -95,6 +100,23 @@ export async function extractScoreboard(
   }
 
   let lastError: Error | null = null;
+  const usageTotals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    totalTokens: 0
+  };
+
+  function addUsage(usage?: OpenAI.Responses.ResponseUsage) {
+    if (!usage) return;
+    if (typeof usage.input_tokens === "number") usageTotals.inputTokens += usage.input_tokens;
+    if (typeof usage.output_tokens === "number") usageTotals.outputTokens += usage.output_tokens;
+    if (typeof usage.total_tokens === "number") usageTotals.totalTokens += usage.total_tokens;
+    if (typeof usage.input_tokens_details?.cached_tokens === "number") {
+      usageTotals.cachedInputTokens += usage.input_tokens_details.cached_tokens;
+    }
+  }
+
   for (const buffer of buffers) {
     try {
       const image = buildImage("high", buffer);
@@ -119,10 +141,11 @@ export async function extractScoreboard(
       } as any);
 
       const output = response.output_text || "";
+      addUsage(response.usage);
       const parsed = parseScoreboardExtraction(output);
       if (!parsed) throw new Error("Failed to parse extraction JSON.");
 
-      const result = buildResult(parsed, output, model, response.usage);
+      const result = buildResult(parsed, output, model, usageTotals);
       if (needsRetry(parsed)) {
         const high = await client.responses.create({
           model,
@@ -141,13 +164,16 @@ export async function extractScoreboard(
           }
         } as any);
         const highOutput = high.output_text || "";
+        addUsage(high.usage);
         const highParsed = parseScoreboardExtraction(highOutput);
         if (highParsed) {
-          return buildResult(highParsed, highOutput, model, high.usage);
+          const refined = await applyFocusedPasses(client, model, buffer, highParsed, addUsage);
+          return buildResult(refined, highOutput, model, usageTotals);
         }
       }
 
-      return result;
+      const refined = await applyFocusedPasses(client, model, buffer, result.extraction, addUsage);
+      return buildResult(refined, output, model, usageTotals);
     } catch (error: any) {
       lastError = error instanceof Error ? error : new Error(String(error));
     }
@@ -169,19 +195,17 @@ function buildResult(
   parsed: ScoreboardExtraction,
   rawText: string,
   model: string,
-  usage?: OpenAI.Responses.ResponseUsage
+  usageTotals: { inputTokens: number; outputTokens: number; cachedInputTokens: number; totalTokens: number }
 ): ScoreboardExtractionResult {
   return {
     extraction: parsed,
     confidence: null,
     rawText,
     model,
-    tokensUsed: typeof usage?.total_tokens === "number" ? usage.total_tokens : null,
-    inputTokens: typeof usage?.input_tokens === "number" ? usage.input_tokens : null,
-    outputTokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : null,
-    cachedInputTokens: typeof usage?.input_tokens_details?.cached_tokens === "number"
-      ? usage.input_tokens_details.cached_tokens
-      : null
+    tokensUsed: usageTotals.totalTokens || null,
+    inputTokens: usageTotals.inputTokens || null,
+    outputTokens: usageTotals.outputTokens || null,
+    cachedInputTokens: usageTotals.cachedInputTokens || null
   };
 }
 
@@ -207,4 +231,95 @@ function needsRetry(extraction: ScoreboardExtraction): boolean {
     nullHeavyRows > 0 ||
     missingShots >= Math.max(1, Math.ceil(rowsWithName.length / 2))
   );
+}
+
+async function applyFocusedPasses(
+  client: OpenAI,
+  model: string,
+  buffer: Buffer,
+  extraction: ScoreboardExtraction,
+  addUsage: (usage?: OpenAI.Responses.ResponseUsage) => void
+): Promise<ScoreboardExtraction> {
+  const multiPassEnabled = (process.env.SCOREBOARD_MULTI_PASS ?? "1") === "1";
+  if (!multiPassEnabled) return extraction;
+
+  const blueNames = extraction.teams.blue.map((player) => player.name ?? "");
+  const orangeNames = extraction.teams.orange.map((player) => player.name ?? "");
+  const stats = ["score", "goals", "assists", "saves", "shots"] as const;
+  let updated = { ...extraction, teams: { ...extraction.teams } };
+
+  for (const stat of stats) {
+    const values = await extractColumn(client, model, buffer, stat, blueNames, orangeNames, addUsage);
+    if (!values) continue;
+    if (values.blue.length === extraction.teams.blue.length) {
+      updated = {
+        ...updated,
+        teams: {
+          ...updated.teams,
+          blue: updated.teams.blue.map((player, index) => ({
+            ...player,
+            [stat]: values.blue[index] ?? player[stat]
+          }))
+        }
+      };
+    }
+    if (values.orange.length === extraction.teams.orange.length) {
+      updated = {
+        ...updated,
+        teams: {
+          ...updated.teams,
+          orange: updated.teams.orange.map((player, index) => ({
+            ...player,
+            [stat]: values.orange[index] ?? player[stat]
+          }))
+        }
+      };
+    }
+  }
+
+  return updated;
+}
+
+async function extractColumn(
+  client: OpenAI,
+  model: string,
+  buffer: Buffer,
+  stat: "score" | "goals" | "assists" | "saves" | "shots",
+  blueNames: string[],
+  orangeNames: string[],
+  addUsage: (usage?: OpenAI.Responses.ResponseUsage) => void
+): Promise<{ blue: (number | null)[]; orange: (number | null)[] } | null> {
+  const prompt = `Read ONLY the "${stat}" column for each player row.
+Return JSON: { "blue": number[]|nulls, "orange": number[]|nulls }.
+Blue rows (top to bottom): ${blueNames.map((name) => `"${name}"`).join(", ") || "none"}.
+Orange rows (top to bottom): ${orangeNames.map((name) => `"${name}"`).join(", ") || "none"}.
+Use null only if unreadable. Use 0 for visible zeros.`;
+
+  const response = await client.responses.create({
+    model,
+    input: [
+      { role: "system", content: "You are a precise OCR extractor for a single scoreboard column." },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: prompt },
+          {
+            type: "input_image",
+            image_url: `data:image/jpeg;base64,${buffer.toString("base64")}`,
+            detail: "high"
+          }
+        ]
+      }
+    ],
+    text: { format: { type: "json_object" } }
+  } as any);
+
+  addUsage(response.usage);
+  const output = response.output_text || "";
+  try {
+    const parsed = columnSchema.parse(JSON.parse(output));
+    return parsed;
+  } catch {
+    return null;
+  }
 }
