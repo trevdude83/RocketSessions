@@ -15,6 +15,7 @@
     "express": "^4.19.2",
     "trn-rocket-league": "^2.0.1",
     "openai": "^4.56.0",
+    "sharp": "^0.33.5",
     "zod": "^3.23.8",
     "dotenv": "^16.4.5"
   },

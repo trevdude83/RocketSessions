@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import fs from "fs/promises";
+import sharp from "sharp";
 import { z } from "zod";
 import { ScoreboardExtraction } from "./types.js";
 
@@ -90,11 +91,13 @@ export async function extractScoreboard(
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   const buffers = await Promise.all(imagePaths.map((path) => fs.readFile(path)));
+  const processedImages = await Promise.all(buffers.map((buffer) => preprocessBuffer(buffer)));
 
-  function buildImage(detail: "low" | "high", buffer: Buffer) {
+  function buildImage(detail: "low" | "high", image: { buffer: Buffer; mime: string }) {
+    const mime = image.mime || "image/jpeg";
     return {
       type: "input_image",
-      image_url: `data:image/jpeg;base64,${buffer.toString("base64")}`,
+      image_url: `data:${mime};base64,${image.buffer.toString("base64")}`,
       detail
     } as any;
   }
@@ -117,9 +120,9 @@ export async function extractScoreboard(
     }
   }
 
-  for (const buffer of buffers) {
+  for (const imageItem of processedImages) {
     try {
-      const image = buildImage("high", buffer);
+      const image = buildImage("high", imageItem);
       const response = await client.responses.create({
         model,
         input: [
@@ -167,12 +170,12 @@ export async function extractScoreboard(
         addUsage(high.usage);
         const highParsed = parseScoreboardExtraction(highOutput);
         if (highParsed) {
-          const refined = await applyFocusedPasses(client, model, buffer, highParsed, addUsage);
+          const refined = await applyFocusedPasses(client, model, imageItem, highParsed, addUsage);
           return buildResult(refined, highOutput, model, usageTotals);
         }
       }
 
-      const refined = await applyFocusedPasses(client, model, buffer, result.extraction, addUsage);
+      const refined = await applyFocusedPasses(client, model, imageItem, result.extraction, addUsage);
       return buildResult(refined, output, model, usageTotals);
     } catch (error: any) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -236,7 +239,7 @@ function needsRetry(extraction: ScoreboardExtraction): boolean {
 async function applyFocusedPasses(
   client: OpenAI,
   model: string,
-  buffer: Buffer,
+  image: { buffer: Buffer; mime: string },
   extraction: ScoreboardExtraction,
   addUsage: (usage?: OpenAI.Responses.ResponseUsage) => void
 ): Promise<ScoreboardExtraction> {
@@ -249,7 +252,7 @@ async function applyFocusedPasses(
   let updated = { ...extraction, teams: { ...extraction.teams } };
 
   for (const stat of stats) {
-    const values = await extractColumn(client, model, buffer, stat, blueNames, orangeNames, addUsage);
+    const values = await extractColumn(client, model, image, stat, blueNames, orangeNames, addUsage);
     if (!values) continue;
     if (values.blue.length === extraction.teams.blue.length) {
       updated = {
@@ -283,7 +286,7 @@ async function applyFocusedPasses(
 async function extractColumn(
   client: OpenAI,
   model: string,
-  buffer: Buffer,
+  image: { buffer: Buffer; mime: string },
   stat: "score" | "goals" | "assists" | "saves" | "shots",
   blueNames: string[],
   orangeNames: string[],
@@ -305,7 +308,7 @@ Use null only if unreadable. Use 0 for visible zeros.`;
           { type: "input_text", text: prompt },
           {
             type: "input_image",
-            image_url: `data:image/jpeg;base64,${buffer.toString("base64")}`,
+            image_url: `data:${image.mime};base64,${image.buffer.toString("base64")}`,
             detail: "high"
           }
         ]
@@ -321,5 +324,22 @@ Use null only if unreadable. Use 0 for visible zeros.`;
     return parsed;
   } catch {
     return null;
+  }
+}
+
+async function preprocessBuffer(buffer: Buffer): Promise<{ buffer: Buffer; mime: string }> {
+  try {
+    const image = sharp(buffer);
+    const meta = await image.metadata();
+    const width = meta.width ?? 0;
+    const targetWidth = width ? Math.min(Math.round(width * 1.5), 2200) : undefined;
+    let pipeline = image;
+    if (targetWidth && width && targetWidth > width) {
+      pipeline = pipeline.resize({ width: targetWidth, kernel: sharp.kernel.lanczos3 });
+    }
+    const output = await pipeline.sharpen().png({ compressionLevel: 3 }).toBuffer();
+    return { buffer: output, mime: "image/png" };
+  } catch {
+    return { buffer, mime: "image/jpeg" };
   }
 }
