@@ -2,7 +2,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { MatchRow, PlayerInput, PlayerRow, ScoreboardDeviceRow, ScoreboardIngestRow, SessionRow, SnapshotRow, TeamRow, SessionTeamStatsRow } from "./types.js";
+import { MatchRow, MatchPlayerRow, PlayerInput, PlayerRow, ScoreboardDeviceRow, ScoreboardIngestRow, ScoreboardAuditRow, SessionRow, SnapshotRow, TeamRow, SessionTeamStatsRow } from "./types.js";
 
 const baseDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const serverDataDir = path.join(baseDir, "data");
@@ -230,6 +230,23 @@ db.exec(`
     isWinner INTEGER,
     nameMatchConfidence REAL
   );
+
+  CREATE TABLE IF NOT EXISTS scoreboard_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    createdAt TEXT NOT NULL,
+    deviceId INTEGER,
+    ingestId INTEGER,
+    sessionId INTEGER,
+    teamId INTEGER,
+    model TEXT,
+    inputTokens INTEGER,
+    cachedInputTokens INTEGER,
+    outputTokens INTEGER,
+    tokensUsed INTEGER,
+    costUsd REAL,
+    success INTEGER NOT NULL,
+    error TEXT
+  );
 `);
 
 db.exec(`
@@ -241,6 +258,7 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_dedupe ON matches(dedupeKey);
   CREATE INDEX IF NOT EXISTS idx_matches_session ON matches(sessionId);
   CREATE INDEX IF NOT EXISTS idx_match_players_match ON match_players(matchId);
+  CREATE INDEX IF NOT EXISTS idx_scoreboard_audit_created ON scoreboard_audit(createdAt);
 `);
 
 try {
@@ -1101,6 +1119,58 @@ export function insertMatchPlayer(input: {
     input.isWinner === null ? null : input.isWinner ? 1 : 0,
     input.nameMatchConfidence
   );
+}
+
+export function getMatch(matchId: number): MatchRow | undefined {
+  return db.prepare("SELECT * FROM matches WHERE id = ?").get(matchId) as MatchRow | undefined;
+}
+
+export function listMatchPlayers(matchId: number): MatchPlayerRow[] {
+  return db
+    .prepare("SELECT * FROM match_players WHERE matchId = ? ORDER BY id ASC")
+    .all(matchId) as MatchPlayerRow[];
+}
+
+export function insertScoreboardAudit(entry: {
+  deviceId: number | null;
+  ingestId: number | null;
+  sessionId: number | null;
+  teamId: number | null;
+  model: string | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  tokensUsed: number | null;
+  costUsd: number | null;
+  success: boolean;
+  error: string | null;
+}): void {
+  const createdAt = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO scoreboard_audit (createdAt, deviceId, ingestId, sessionId, teamId, model, inputTokens, cachedInputTokens, outputTokens, tokensUsed, costUsd, success, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    createdAt,
+    entry.deviceId,
+    entry.ingestId,
+    entry.sessionId,
+    entry.teamId,
+    entry.model,
+    entry.inputTokens,
+    entry.cachedInputTokens,
+    entry.outputTokens,
+    entry.tokensUsed,
+    entry.costUsd,
+    entry.success ? 1 : 0,
+    entry.error
+  );
+}
+
+export function listScoreboardAudit(limit: number): ScoreboardAuditRow[] {
+  return db
+    .prepare(
+      "SELECT id, createdAt, deviceId, ingestId, sessionId, teamId, model, inputTokens, cachedInputTokens, outputTokens, tokensUsed, costUsd, success, error FROM scoreboard_audit ORDER BY createdAt DESC LIMIT ?"
+    )
+    .all(limit) as ScoreboardAuditRow[];
 }
 
 export function createUser(

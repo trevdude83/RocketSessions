@@ -119,6 +119,22 @@ export interface CoachAuditEntry {
   error: string | null;
 }
 
+export interface ScoreboardAuditEntry {
+  id: number;
+  createdAt: string;
+  deviceId: number | null;
+  ingestId: number | null;
+  sessionId: number | null;
+  teamId: number | null;
+  model: string | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  tokensUsed: number | null;
+  costUsd: number | null;
+  success: number;
+  error: string | null;
+}
 
 export interface CoachReport {
   headline: string;

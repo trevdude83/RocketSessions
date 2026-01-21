@@ -28,6 +28,11 @@ export type ScoreboardExtractionResult = {
   extraction: ScoreboardExtraction;
   confidence: number | null;
   rawText: string;
+  model: string | null;
+  tokensUsed: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cachedInputTokens: number | null;
 };
 
 const SYSTEM_PROMPT = [
@@ -61,7 +66,12 @@ export async function extractScoreboard(
         teams: { blue: [], orange: [] }
       },
       confidence: null,
-      rawText: "OPENAI_API_KEY missing"
+      rawText: "OPENAI_API_KEY missing",
+      model: null,
+      tokensUsed: null,
+      inputTokens: null,
+      outputTokens: null,
+      cachedInputTokens: null
     };
   }
 
@@ -110,7 +120,14 @@ export async function extractScoreboard(
       return {
         extraction: parsed,
         confidence: null,
-        rawText: output
+        rawText: output,
+        model,
+        tokensUsed: typeof response.usage?.total_tokens === "number" ? response.usage.total_tokens : null,
+        inputTokens: typeof response.usage?.input_tokens === "number" ? response.usage.input_tokens : null,
+        outputTokens: typeof response.usage?.output_tokens === "number" ? response.usage.output_tokens : null,
+        cachedInputTokens: typeof response.usage?.input_tokens_details?.cached_tokens === "number"
+          ? response.usage.input_tokens_details.cached_tokens
+          : null
       };
     } catch (error: any) {
       lastError = error instanceof Error ? error : new Error(String(error));

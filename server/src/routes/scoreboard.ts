@@ -14,6 +14,7 @@ import {
   getScoreboardIngest,
   getScoreboardIngestByDedupe,
   getLatestScoreboardIngestForDevice,
+  getMatch,
   getSession,
   getSetting,
   getTeam,
@@ -21,7 +22,10 @@ import {
   insertMatch,
   insertMatchPlayer,
   insertScoreboardIngestImage,
+  insertScoreboardAudit,
+  listMatchPlayers,
   listScoreboardDevices,
+  listScoreboardAudit,
   listScoreboardIngestImages,
   listScoreboardIngests,
   setSetting,
@@ -35,6 +39,7 @@ import { mapPlayers } from "../scoreboard/playerMapper.js";
 import { deriveMatch } from "../scoreboard/matchDeriver.js";
 import { applyMatchToSession } from "../scoreboard/matchApplier.js";
 import { hashBuffer } from "../scoreboard/dedupe.js";
+import { computeOpenAiCostUsd } from "../openaiCost.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -235,6 +240,46 @@ router.get("/ingest/:ingestId", deviceAuth, (req, res) => {
   });
 });
 
+router.get("/ingest/:ingestId/detail", deviceAuth, (req, res) => {
+  const ingestId = Number(req.params.ingestId);
+  const ingest = getScoreboardIngest(ingestId);
+  if (!ingest) return res.status(404).json({ error: "Ingest not found" });
+  if (req.scoreboardDevice?.id && ingest.deviceId !== req.scoreboardDevice.id) {
+    return res.status(403).json({ error: "Device does not own ingest" });
+  }
+
+  const match = ingest.matchId ? getMatch(ingest.matchId) : undefined;
+  const players = match ? listMatchPlayers(match.id) : [];
+  const rawExtraction = match?.rawExtractionJson ? safeJsonParse(match.rawExtractionJson) : null;
+  const derivedMatch = match?.derivedMatchJson ? safeJsonParse(match.derivedMatchJson) : null;
+
+  res.json({
+    ingest: {
+      id: ingest.id,
+      status: ingest.status,
+      errorMessage: ingest.errorMessage,
+      sessionId: ingest.sessionId,
+      teamId: ingest.teamId,
+      focusPlaylistId: ingest.focusPlaylistId,
+      matchId: ingest.matchId
+    },
+    match: match
+      ? {
+          id: match.id,
+          sessionId: match.sessionId,
+          teamId: match.teamId,
+          source: match.source,
+          createdAt: match.createdAt,
+          extractionConfidence: match.extractionConfidence,
+          dedupeKey: match.dedupeKey
+        }
+      : null,
+    players,
+    rawExtraction,
+    derivedMatch
+  });
+});
+
 router.get("/admin/devices", requireAuth, requireAdmin, (req, res) => {
   res.json(listScoreboardDevices());
 });
@@ -272,6 +317,11 @@ router.get("/admin/ingests", requireAuth, requireAdmin, (req, res) => {
   res.json(listScoreboardIngests(Number.isFinite(limit) ? limit : 50));
 });
 
+router.get("/admin/audit", requireAuth, requireAdmin, (req, res) => {
+  const limit = Number(req.query.limit ?? 200);
+  res.json(listScoreboardAudit(Number.isFinite(limit) ? limit : 200));
+});
+
 router.post("/admin/ingests/:ingestId/process", requireAuth, requireAdmin, async (req, res) => {
   const ingestId = Number(req.params.ingestId);
   const result = await processIngest(ingestId, null);
@@ -282,6 +332,14 @@ function getActiveSession() {
   return db
     .prepare("SELECT * FROM sessions WHERE isActive = 1 AND isEnded = 0 ORDER BY createdAt DESC LIMIT 1")
     .get() as { id: number; teamId: number | null; mode: string; matchIndex: number } | undefined;
+}
+
+function safeJsonParse(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 async function processIngest(
@@ -403,6 +461,26 @@ async function processIngest(
       });
     }
 
+    insertScoreboardAudit({
+      deviceId: ingest.deviceId,
+      ingestId: ingest.id,
+      sessionId: ingest.sessionId,
+      teamId: ingest.teamId,
+      model: extractionResult.model,
+      inputTokens: extractionResult.inputTokens,
+      cachedInputTokens: extractionResult.cachedInputTokens,
+      outputTokens: extractionResult.outputTokens,
+      tokensUsed: extractionResult.tokensUsed,
+      costUsd: computeOpenAiCostUsd(
+        extractionResult.model,
+        extractionResult.inputTokens,
+        extractionResult.cachedInputTokens,
+        extractionResult.outputTokens
+      ),
+      success: true,
+      error: null
+    });
+
     updateScoreboardIngest(ingestId, {
       status: "extracted",
       errorMessage: null,
@@ -411,6 +489,20 @@ async function processIngest(
 
     return { status: 200, body: { ingestId, status: "extracted", matchId: match.id } };
   } catch (error: any) {
+    insertScoreboardAudit({
+      deviceId: ingest.deviceId,
+      ingestId: ingest.id,
+      sessionId: ingest.sessionId,
+      teamId: ingest.teamId,
+      model: null,
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      tokensUsed: null,
+      costUsd: null,
+      success: false,
+      error: error?.message || "Failed to process ingest"
+    });
     updateScoreboardIngest(ingestId, {
       status: "failed",
       errorMessage: error?.message || "Failed to process ingest"

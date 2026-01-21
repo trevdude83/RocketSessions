@@ -103,6 +103,38 @@ export interface MatchRow {
   dedupeKey: string | null;
 }
 
+export interface MatchPlayerRow {
+  id: number;
+  matchId: number;
+  playerId: number | null;
+  gamertag: string;
+  platform: Platform;
+  goals: number | null;
+  assists: number | null;
+  saves: number | null;
+  shots: number | null;
+  score: number | null;
+  isWinner: number | null;
+  nameMatchConfidence: number | null;
+}
+
+export interface ScoreboardAuditRow {
+  id: number;
+  createdAt: string;
+  deviceId: number | null;
+  ingestId: number | null;
+  sessionId: number | null;
+  teamId: number | null;
+  model: string | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  tokensUsed: number | null;
+  costUsd: number | null;
+  success: number;
+  error: string | null;
+}
+
 
 export interface DerivedPlaylistStats {
   playlistId: number;

@@ -5,6 +5,7 @@ import {
   getApiKeyValue,
   getApiBaseUrl,
   getCoachAuditLogs,
+  getScoreboardAuditLogs,
   getCoachPacket,
   getCoachPrompt,
   getTeamCoachPrompt,
@@ -27,7 +28,7 @@ import {
   setCoachPrompt,
   setOpenAiKey
 } from "../api";
-import { CoachAuditEntry, DbMetricPoint, PollingLogEntry, Session } from "../types";
+import { CoachAuditEntry, DbMetricPoint, PollingLogEntry, ScoreboardAuditEntry, Session } from "../types";
 import {
   LineChart,
   Line,
@@ -55,6 +56,8 @@ export default function SystemAdmin() {
   const [pollingAutoRefresh, setPollingAutoRefresh] = useState(true);
   const [coachAudit, setCoachAudit] = useState<CoachAuditEntry[]>([]);
   const [coachAuditLoading, setCoachAuditLoading] = useState(false);
+  const [scoreboardAudit, setScoreboardAudit] = useState<ScoreboardAuditEntry[]>([]);
+  const [scoreboardAuditLoading, setScoreboardAuditLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [apiKey, setApiKeyValue] = useState("");
@@ -160,12 +163,28 @@ export default function SystemAdmin() {
     }
   }
 
+  async function loadScoreboardAudit() {
+    setScoreboardAuditLoading(true);
+    try {
+      const logs = await getScoreboardAuditLogs(200);
+      setScoreboardAudit(logs);
+    } catch {
+      return;
+    } finally {
+      setScoreboardAuditLoading(false);
+    }
+  }
+
   useEffect(() => {
     void loadPollingLogs();
   }, []);
 
   useEffect(() => {
     void loadCoachAudit();
+  }, []);
+
+  useEffect(() => {
+    void loadScoreboardAudit();
   }, []);
 
 
@@ -908,6 +927,48 @@ export default function SystemAdmin() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+            <div className="panel-block">
+              <div className="section-header">
+                <h3>Scoreboard Vision audit log</h3>
+                <div className="actions">
+                  <button className="ghost" onClick={loadScoreboardAudit} disabled={scoreboardAuditLoading}>
+                    {scoreboardAuditLoading ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+              </div>
+              <p className="panel-help">Latest 200 scoreboard extraction calls with token usage and failures.</p>
+              {scoreboardAudit.length === 0 && <p>No scoreboard audit entries yet.</p>}
+              {scoreboardAudit.length > 0 && (
+                <div className="coach-audit-table">
+                  <div className="coach-audit-row header">
+                    <span>Time</span>
+                    <span>Device</span>
+                    <span>Ingest</span>
+                    <span>Model</span>
+                    <span>Input</span>
+                    <span>Output</span>
+                    <span>Cost</span>
+                    <span>Status</span>
+                    <span>Error</span>
+                  </div>
+                  {scoreboardAudit.map((row) => (
+                    <div className="coach-audit-row" key={row.id}>
+                      <span>{formatDateTime(row.createdAt)}</span>
+                      <span>{row.deviceId ? `Device #${row.deviceId}` : "-"}</span>
+                      <span>{row.ingestId ? `Ingest #${row.ingestId}` : "-"}</span>
+                      <span>{row.model ?? "-"}</span>
+                      <span>{row.inputTokens ?? "-"}</span>
+                      <span>{row.outputTokens ?? "-"}</span>
+                      <span>{row.costUsd !== null ? formatUsd(row.costUsd) : "-"}</span>
+                      <span className={row.success ? "status-pill ok" : "status-pill error"}>
+                        {row.success ? "Success" : "Failed"}
+                      </span>
+                      <span>{row.error ?? "-"}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

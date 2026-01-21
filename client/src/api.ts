@@ -1,4 +1,4 @@
-import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, PollingLogEntry, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, GameStatRow, ScoreboardDevice, ScoreboardIngest } from "./types";
+import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, PollingLogEntry, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, ScoreboardAuditEntry, GameStatRow, ScoreboardDevice, ScoreboardIngest } from "./types";
 
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -279,6 +279,11 @@ export async function getPollingLogs(limit = 200): Promise<PollingLogEntry[]> {
 export async function getCoachAuditLogs(limit = 200): Promise<CoachAuditEntry[]> {
   const res = await apiFetch(`/api/logs/coach?limit=${limit}`);
   return handleJson<CoachAuditEntry[]>(res);
+}
+
+export async function getScoreboardAuditLogs(limit = 200): Promise<ScoreboardAuditEntry[]> {
+  const res = await apiFetch(`/api/v1/scoreboard/admin/audit?limit=${limit}`);
+  return handleJson<ScoreboardAuditEntry[]>(res);
 }
 
 export async function getStatsApiStatus(
