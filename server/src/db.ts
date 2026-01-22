@@ -213,7 +213,8 @@ db.exec(`
     rawExtractionJson TEXT NOT NULL,
     derivedMatchJson TEXT NOT NULL,
     extractionConfidence REAL,
-    dedupeKey TEXT
+    dedupeKey TEXT,
+    signatureKey TEXT
   );
 
   CREATE TABLE IF NOT EXISTS match_players (
@@ -257,6 +258,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scoreboard_ingest_images_ingest ON scoreboard_ingest_images(ingestId);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_dedupe ON matches(dedupeKey);
   CREATE INDEX IF NOT EXISTS idx_matches_session ON matches(sessionId);
+  CREATE INDEX IF NOT EXISTS idx_matches_signature ON matches(signatureKey);
   CREATE INDEX IF NOT EXISTS idx_match_players_match ON match_players(matchId);
   CREATE INDEX IF NOT EXISTS idx_scoreboard_audit_created ON scoreboard_audit(createdAt);
 `);
@@ -303,6 +305,9 @@ try {
 } catch {}
 try {
   db.exec("ALTER TABLE snapshots ADD COLUMN matchIndex INTEGER");
+} catch {}
+try {
+  db.exec("ALTER TABLE matches ADD COLUMN signatureKey TEXT");
 } catch {}
 
 try {
@@ -1061,6 +1066,16 @@ export function findMatchByDedupe(dedupeKey: string): MatchRow | undefined {
   return db.prepare("SELECT * FROM matches WHERE dedupeKey = ?").get(dedupeKey) as MatchRow | undefined;
 }
 
+export function findMatchBySignature(signature: string, sessionId: number | null): MatchRow | undefined {
+  if (!signature) return undefined;
+  if (typeof sessionId === "number") {
+    return db
+      .prepare("SELECT * FROM matches WHERE sessionId = ? AND signatureKey = ?")
+      .get(sessionId, signature) as MatchRow | undefined;
+  }
+  return db.prepare("SELECT * FROM matches WHERE signatureKey = ?").get(signature) as MatchRow | undefined;
+}
+
 export function insertMatch(input: {
   sessionId: number | null;
   teamId: number | null;
@@ -1070,10 +1085,11 @@ export function insertMatch(input: {
   derivedMatchJson: string;
   extractionConfidence: number | null;
   dedupeKey: string | null;
+  signatureKey: string | null;
 }): MatchRow {
   const result = db
     .prepare(
-      "INSERT INTO matches (sessionId, teamId, source, createdAt, rawExtractionJson, derivedMatchJson, extractionConfidence, dedupeKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO matches (sessionId, teamId, source, createdAt, rawExtractionJson, derivedMatchJson, extractionConfidence, dedupeKey, signatureKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .run(
       input.sessionId,
@@ -1083,7 +1099,8 @@ export function insertMatch(input: {
       input.rawExtractionJson,
       input.derivedMatchJson,
       input.extractionConfidence,
-      input.dedupeKey
+      input.dedupeKey,
+      input.signatureKey
     );
   return {
     id: Number(result.lastInsertRowid),

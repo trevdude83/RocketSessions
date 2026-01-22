@@ -101,6 +101,7 @@ export interface MatchRow {
   derivedMatchJson: string;
   extractionConfidence: number | null;
   dedupeKey: string | null;
+  signatureKey: string | null;
 }
 
 export interface MatchPlayerRow {

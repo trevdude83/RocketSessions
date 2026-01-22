@@ -9,6 +9,7 @@ import {
   createScoreboardDevice,
   createScoreboardIngest,
   findMatchByDedupe,
+  findMatchBySignature,
   getScoreboardDeviceByHash,
   getScoreboardDevice,
   getScoreboardIngest,
@@ -382,6 +383,17 @@ async function processIngest(
     const mappedOrange = mapPlayers(extraction.teams.orange, playerIdentities);
 
     const derivedMatch = deriveMatch(extraction);
+    const signatureKey = extractionResult.dedupeSignature;
+    const existingMatch = findMatchBySignature(signatureKey, session?.id ?? null);
+    if (existingMatch) {
+      updateScoreboardIngest(ingestId, {
+        status: "extracted",
+        errorMessage: "Duplicate scoreboard stats.",
+        matchId: existingMatch.id
+      });
+      return { status: 200, body: { ingestId, status: "extracted", matchId: existingMatch.id } };
+    }
+
     const match = insertMatch({
       sessionId: session?.id ?? null,
       teamId: team?.id ?? null,
@@ -390,7 +402,8 @@ async function processIngest(
       rawExtractionJson: JSON.stringify(extraction),
       derivedMatchJson: JSON.stringify(derivedMatch),
       extractionConfidence: extractionResult.confidence,
-      dedupeKey: ingest.dedupeKey
+      dedupeKey: ingest.dedupeKey,
+      signatureKey
     });
 
     extraction.teams.blue.forEach((player, index) => {

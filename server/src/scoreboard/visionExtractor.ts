@@ -39,6 +39,7 @@ export type ScoreboardExtractionResult = {
   inputTokens: number | null;
   outputTokens: number | null;
   cachedInputTokens: number | null;
+  dedupeSignature: string;
 };
 
 const SYSTEM_PROMPT = [
@@ -209,7 +210,8 @@ function buildResult(
     tokensUsed: usageTotals.totalTokens || null,
     inputTokens: usageTotals.inputTokens || null,
     outputTokens: usageTotals.outputTokens || null,
-    cachedInputTokens: usageTotals.cachedInputTokens || null
+    cachedInputTokens: usageTotals.cachedInputTokens || null,
+    dedupeSignature: buildDedupeSignature(parsed)
   };
 }
 
@@ -235,6 +237,32 @@ function needsRetry(extraction: ScoreboardExtraction): boolean {
     nullHeavyRows > 0 ||
     missingShots >= Math.max(1, Math.ceil(rowsWithName.length / 2))
   );
+}
+
+function normalizeForSignature(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function buildDedupeSignature(extraction: ScoreboardExtraction): string {
+  const teamKey = (team: ScoreboardTeam) =>
+    extraction.teams[team].map((player) => {
+      const name = normalizeForSignature(player.name ?? "");
+      const stats = [
+        player.score ?? "",
+        player.goals ?? "",
+        player.assists ?? "",
+        player.saves ?? "",
+        player.shots ?? ""
+      ].join("|");
+      return `${name}:${stats}`;
+    });
+
+  const payload = {
+    winningTeam: extraction.match.winningTeam ?? "",
+    blue: teamKey("blue"),
+    orange: teamKey("orange")
+  };
+  return JSON.stringify(payload);
 }
 
 async function applyFocusedPasses(
