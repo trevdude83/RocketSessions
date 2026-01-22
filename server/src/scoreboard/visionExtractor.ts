@@ -65,7 +65,8 @@ const USER_PROMPT = `Return JSON with this schema:
 Rules:
 - Each player row should include all five stats (score, goals, assists, saves, shots) if visible.
 - Use 0 for clearly visible zeros/blank cells, null only if unreadable or missing from the image.
-- Preserve brackets and clan tags in names exactly as shown.`;
+- Preserve brackets and clan tags in names exactly as shown.
+- Column order is: SCORE, GOALS, ASSISTS, SAVES, SHOTS, then PING. Do not read PING values as SHOTS.`;
 
 export async function extractScoreboard(
   imagePaths: string[],

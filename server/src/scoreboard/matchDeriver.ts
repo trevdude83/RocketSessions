@@ -40,22 +40,37 @@ export function deriveMatch(extraction: ScoreboardExtraction): DerivedMatch {
 
 function sumTeam(players: { goals: number | null; assists: number | null; saves: number | null; shots: number | null; score: number | null }[]): TeamTotals {
   const totals = players.reduce(
-    (acc: TeamAccumulator, player) => {
-      if (typeof player.goals === "number") acc.goals += player.goals;
-      if (typeof player.assists === "number") acc.assists += player.assists;
-      if (typeof player.saves === "number") acc.saves += player.saves;
-      if (typeof player.shots === "number") acc.shots += player.shots;
-      if (typeof player.score === "number") acc.score += player.score;
+    (acc: TeamAccumulator & { seen: Record<keyof TeamAccumulator, boolean> }, player) => {
+      if (typeof player.goals === "number") {
+        acc.goals += player.goals;
+        acc.seen.goals = true;
+      }
+      if (typeof player.assists === "number") {
+        acc.assists += player.assists;
+        acc.seen.assists = true;
+      }
+      if (typeof player.saves === "number") {
+        acc.saves += player.saves;
+        acc.seen.saves = true;
+      }
+      if (typeof player.shots === "number") {
+        acc.shots += player.shots;
+        acc.seen.shots = true;
+      }
+      if (typeof player.score === "number") {
+        acc.score += player.score;
+        acc.seen.score = true;
+      }
       return acc;
     },
-    { goals: 0, assists: 0, saves: 0, shots: 0, score: 0 }
+    { goals: 0, assists: 0, saves: 0, shots: 0, score: 0, seen: { goals: false, assists: false, saves: false, shots: false, score: false } }
   );
 
   return {
-    goals: totals.goals || null,
-    assists: totals.assists || null,
-    saves: totals.saves || null,
-    shots: totals.shots || null,
-    score: totals.score || null
+    goals: totals.seen.goals ? totals.goals : null,
+    assists: totals.seen.assists ? totals.assists : null,
+    saves: totals.seen.saves ? totals.saves : null,
+    shots: totals.seen.shots ? totals.shots : null,
+    score: totals.seen.score ? totals.score : null
   };
 }
