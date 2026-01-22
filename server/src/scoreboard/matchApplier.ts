@@ -56,6 +56,7 @@ function applyPlayerTotals(
   const prevAssists = numberOrZero(previous?.assists);
   const prevSaves = numberOrZero(previous?.saves);
   const prevShots = numberOrZero(previous?.shots);
+  const prevScore = numberOrZero(previous?.score);
 
   const winDelta = winningTeam ? (match.team === winningTeam ? 1 : 0) : 0;
   const lossDelta = winningTeam ? (match.team === winningTeam ? 0 : 1) : 0;
@@ -66,6 +67,7 @@ function applyPlayerTotals(
   const assists = prevAssists + numberOrZero(match.assists);
   const saves = prevSaves + numberOrZero(match.saves);
   const shots = prevShots + numberOrZero(match.shots);
+  const score = prevScore + numberOrZero(match.score);
 
   return {
     lastUpdated: createdAt,
@@ -76,6 +78,7 @@ function applyPlayerTotals(
     assists,
     saves,
     shots,
+    score,
     winRate: wins + losses > 0 ? wins / (wins + losses) : null,
     goalShotRatio: shots > 0 ? goals / shots : null,
     mmr: previous?.mmr ?? null,
@@ -101,4 +104,3 @@ function safeParseDerived(value: string): DerivedMetrics | null {
     return null;
   }
 }
-

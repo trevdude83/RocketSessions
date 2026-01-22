@@ -1,5 +1,4 @@
 import { Player, SnapshotSummary } from "../types";
-import { formatRank } from "../utils/rank";
 
 interface Props {
   player: Player;
@@ -26,27 +25,8 @@ function deltaClass(value: number | null | undefined) {
   return "";
 }
 
-function formatRankLabel(metrics: SnapshotSummary["derived"] | null | undefined): string | null {
-  const tierIndex = metrics?.rankTierIndex;
-  if (typeof tierIndex === "number" && Number.isFinite(tierIndex)) {
-    const divisionIndex = typeof metrics?.rankDivisionIndex === "number" ? metrics.rankDivisionIndex : 0;
-    return formatRank(tierIndex * 10 + divisionIndex);
-  }
-  const rank = metrics?.rank;
-  if (typeof rank === "string" && rank.trim().length > 0) {
-    if (/^\d+$/.test(rank.trim())) {
-      return formatRank(Number(rank.trim()));
-    }
-    return rank;
-  }
-  const points = metrics?.rankPoints;
-  if (typeof points !== "number" || !Number.isFinite(points)) return null;
-  return formatRank(points);
-}
-
 export default function PlayerCard({ player, baseline, latest, delta }: Props) {
   const latestMetrics = latest?.derived;
-  const rankLabel = formatRankLabel(latestMetrics ?? baseline?.derived);
   return (
     <article className="card">
       <div className="player-header">
@@ -93,19 +73,11 @@ export default function PlayerCard({ player, baseline, latest, delta }: Props) {
           <small className={deltaClass(delta?.goalShotRatio)}>{formatDelta(delta?.goalShotRatio)}</small>
         </div>
         <div>
-          <span>MMR</span>
-          <strong>{formatValue(latestMetrics?.mmr)}</strong>
-          <small className={deltaClass(delta?.mmr)}>{formatDelta(delta?.mmr)}</small>
+          <span>Score</span>
+          <strong>{formatValue(latestMetrics?.score)}</strong>
+          <small className={deltaClass(delta?.score)}>{formatDelta(delta?.score)}</small>
         </div>
       </div>
-      {rankLabel && (
-        <p className="rank">
-          {latestMetrics?.rankIconUrl && (
-            <img className="rank-icon" src={latestMetrics.rankIconUrl} alt={`${rankLabel} icon`} />
-          )}
-          Rank: {rankLabel}
-        </p>
-      )}
     </article>
   );
 }

@@ -31,6 +31,7 @@ export interface DerivedMetrics {
   assists: number | null;
   saves: number | null;
   shots: number | null;
+  score: number | null;
   winRate: number | null;
   goalShotRatio: number | null;
   mmr: number | null;
@@ -78,27 +79,13 @@ export interface GameStatRow {
   shots: number | null;
   assists: number | null;
   saves: number | null;
+  score?: number | null;
 }
 
 export interface DbMetricPoint {
   t: string;
   sizeBytes: number;
   snapshotsCount: number;
-}
-
-export interface PollingLogEntry {
-  id: number;
-  createdAt: string;
-  sessionId: number;
-  playerId: number | null;
-  gamertag: string | null;
-  lastMatchId: string | null;
-  lastMatchAt: string | null;
-  latestMatchId: string | null;
-  latestMatchAt: string | null;
-  newMatches: number;
-  totalMatches: number;
-  error: string | null;
 }
 
 export interface CoachAuditEntry {
@@ -273,4 +260,5 @@ export interface ScoreboardIngest {
   focusPlaylistId: number | null;
   dedupeKey: string | null;
   matchId: number | null;
+  signatureKey?: string | null;
 }

@@ -12,7 +12,6 @@ import {
   getTeamCoachPacket,
   setTeamCoachPrompt,
   getDbMetrics,
-  getPollingLogs,
   getDefaultCoachPrompt,
   getDefaultTeamCoachPrompt,
   setDefaultCoachPrompt,
@@ -28,7 +27,7 @@ import {
   setCoachPrompt,
   setOpenAiKey
 } from "../api";
-import { CoachAuditEntry, DbMetricPoint, PollingLogEntry, ScoreboardAuditEntry, Session } from "../types";
+import { CoachAuditEntry, DbMetricPoint, ScoreboardAuditEntry, Session } from "../types";
 import {
   LineChart,
   Line,
@@ -51,9 +50,6 @@ export default function SystemAdmin() {
   const [teams, setTeams] = useState<{ id: number; name: string; mode: string }[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [dbMetrics, setDbMetrics] = useState<DbMetricPoint[]>([]);
-  const [pollingLogs, setPollingLogs] = useState<PollingLogEntry[]>([]);
-  const [pollingLoading, setPollingLoading] = useState(false);
-  const [pollingAutoRefresh, setPollingAutoRefresh] = useState(true);
   const [coachAudit, setCoachAudit] = useState<CoachAuditEntry[]>([]);
   const [coachAuditLoading, setCoachAuditLoading] = useState(false);
   const [scoreboardAudit, setScoreboardAudit] = useState<ScoreboardAuditEntry[]>([]);
@@ -139,18 +135,6 @@ export default function SystemAdmin() {
       .catch((err) => setError(err.message));
   }, [selectedSessionId]);
 
-  async function loadPollingLogs() {
-    setPollingLoading(true);
-    try {
-      const logs = await getPollingLogs(200);
-      setPollingLogs(logs);
-    } catch {
-      return;
-    } finally {
-      setPollingLoading(false);
-    }
-  }
-
   async function loadCoachAudit() {
     setCoachAuditLoading(true);
     try {
@@ -176,10 +160,6 @@ export default function SystemAdmin() {
   }
 
   useEffect(() => {
-    void loadPollingLogs();
-  }, []);
-
-  useEffect(() => {
     void loadCoachAudit();
   }, []);
 
@@ -187,14 +167,6 @@ export default function SystemAdmin() {
     void loadScoreboardAudit();
   }, []);
 
-
-  useEffect(() => {
-    if (!pollingAutoRefresh) return;
-    const interval = setInterval(() => {
-      void loadPollingLogs();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [pollingAutoRefresh]);
 
   useEffect(() => {
     getApiKeyStatus()
@@ -992,57 +964,6 @@ export default function SystemAdmin() {
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </section>
-
-        <section className="panel">
-          <div className="section-header">
-            <h2>Polling logs</h2>
-            <div className="actions">
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={pollingAutoRefresh}
-                  onChange={(e) => setPollingAutoRefresh(e.target.checked)}
-                />
-                Auto refresh
-              </label>
-              <button className="ghost" onClick={loadPollingLogs} disabled={pollingLoading}>
-                {pollingLoading ? "Refreshing..." : "Refresh"}
-              </button>
-            </div>
-          </div>
-          <p className="panel-help">Latest 200 polling events across all sessions.</p>
-          {pollingLogs.length === 0 && <p>No logs yet.</p>}
-          {pollingLogs.length > 0 && (
-            <div className="team-history-table extra">
-              <div className="team-history-row header">
-                <span>Time</span>
-                <span>Session</span>
-                <span>Player</span>
-                <span>Last match ID</span>
-                <span>Last match at</span>
-                <span>API latest ID</span>
-                <span>API latest at</span>
-                <span>New matches</span>
-                <span>Total matches</span>
-                <span>Error</span>
-              </div>
-              {pollingLogs.map((log) => (
-                <div className="team-history-row" key={log.id}>
-                  <span>{formatDateTime(log.createdAt)}</span>
-                  <span>#{log.sessionId}</span>
-                  <span>{log.gamertag || "-"}</span>
-                  <span>{log.lastMatchId || "-"}</span>
-                  <span>{formatDateTime(log.lastMatchAt)}</span>
-                  <span>{log.latestMatchId || "-"}</span>
-                  <span>{formatDateTime(log.latestMatchAt)}</span>
-                  <span>{log.newMatches}</span>
-                  <span>{log.totalMatches}</span>
-                  <span>{log.error || "-"}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </section>
 
       </main>

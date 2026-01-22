@@ -1,4 +1,4 @@
-import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, PollingLogEntry, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, ScoreboardAuditEntry, GameStatRow, ScoreboardDevice, ScoreboardIngest } from "./types";
+import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, ScoreboardAuditEntry, GameStatRow, ScoreboardDevice, ScoreboardIngest } from "./types";
 
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -245,6 +245,7 @@ export async function uploadManualSnapshots(
   sessionId: number,
   payload: {
     matchIndex?: number;
+    baselineOnly?: boolean;
     snapshots: { playerId?: number; gamertag?: string; rawJson: unknown }[];
   }
 ): Promise<{ ok: boolean; matchIndex: number; inserted: number; skipped: number }> {
@@ -269,11 +270,6 @@ export async function backfillSnapshot(snapshotId: number): Promise<void> {
 export async function getDbMetrics(sessionId: number, limit = 100): Promise<DbMetricPoint[]> {
   const res = await apiFetch(`/api/metrics/db?sessionId=${sessionId}&limit=${limit}`);
   return handleJson<DbMetricPoint[]>(res);
-}
-
-export async function getPollingLogs(limit = 200): Promise<PollingLogEntry[]> {
-  const res = await apiFetch(`/api/logs/polling?limit=${limit}`);
-  return handleJson<PollingLogEntry[]>(res);
 }
 
 export async function getCoachAuditLogs(limit = 200): Promise<CoachAuditEntry[]> {

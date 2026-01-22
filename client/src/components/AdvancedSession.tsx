@@ -29,7 +29,6 @@ export default function AdvancedSession() {
   const [backfillMessage, setBackfillMessage] = useState<string | null>(null);
   const [backfillingAll, setBackfillingAll] = useState(false);
   const [backfillingId, setBackfillingId] = useState<number | null>(null);
-  const [manualMatchIndex, setManualMatchIndex] = useState("");
   const [manualPayloads, setManualPayloads] = useState<Record<number, string>>({});
   const [manualMessage, setManualMessage] = useState<string | null>(null);
   const [manualSubmitting, setManualSubmitting] = useState(false);
@@ -128,21 +127,11 @@ export default function AdvancedSession() {
       return;
     }
 
-    const trimmedMatchIndex = manualMatchIndex.trim();
-    let matchIndex: number | undefined;
-    if (trimmedMatchIndex.length > 0) {
-      const matchIndexValue = Number(trimmedMatchIndex);
-      if (!Number.isFinite(matchIndexValue) || matchIndexValue < 1) {
-        throw new Error("Match number must be 1 or higher.");
-      }
-      matchIndex = matchIndexValue;
-    }
-
     setManualSubmitting(true);
     try {
-      const result = await uploadManualSnapshots(detail.session.id, { matchIndex, snapshots });
+      const result = await uploadManualSnapshots(detail.session.id, { snapshots, baselineOnly: true });
       const skippedText = result.skipped > 0 ? ` (${result.skipped} skipped)` : "";
-      setManualMessage(`Stored ${result.inserted} snapshot(s) for match #${result.matchIndex}${skippedText}.`);
+      setManualMessage(`Stored ${result.inserted} baseline snapshot(s)${skippedText}.`);
       const updated = await getRawSnapshots(detail.session.id, limit);
       setSnapshots(updated);
     } catch (err: any) {
@@ -245,25 +234,15 @@ export default function AdvancedSession() {
             <h2>Manual snapshot upload</h2>
           </div>
           <p className="panel-help">
-            Paste player stats API profile JSON after each game. Temporary fallback while API access is limited.
+            Paste baseline JSON for each player to populate the session starting point.
           </p>
           <div className="form">
-            <label>
-              Match number (optional)
-              <input
-                type="number"
-                min={1}
-                placeholder="Leave blank for next match"
-                value={manualMatchIndex}
-                onChange={(e) => setManualMatchIndex(e.target.value)}
-              />
-            </label>
             {players.map((player) => (
               <label key={player.id}>
                 {player.gamertag} JSON
                 <textarea
                   rows={6}
-                  placeholder="Paste player stats API profile JSON here..."
+                  placeholder='Paste baseline JSON here (e.g. {"wins":0,"goals":0,"assists":0,"saves":0,"shots":0,"score":0})'
                   value={manualPayloads[player.id] ?? ""}
                   onChange={(e) =>
                     setManualPayloads((prev) => ({ ...prev, [player.id]: e.target.value }))

@@ -6,8 +6,8 @@ import scoreboardRouter from "./routes/scoreboard.js";
 import { db, getSetting } from "./db.js";
 import fs from "fs";
 import path from "path";
-import { startPolling } from "./sessionManager.js";
 import { attachAuth } from "./auth.js";
+import { cleanupScoreboards } from "./scoreboard/cleanupScoreboards.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -85,13 +85,14 @@ app.listen(port, () => {
   if (savedBaseUrl && !process.env.PLAYER_STATS_API_BASE_URL) {
     process.env.PLAYER_STATS_API_BASE_URL = savedBaseUrl;
   }
-  const activeSessions = db
-    .prepare("SELECT id, pollingIntervalSeconds FROM sessions WHERE isActive = 1")
-    .all() as { id: number; pollingIntervalSeconds: number }[];
-
-  activeSessions.forEach((session) => {
-    startPolling(session.id, session.pollingIntervalSeconds);
+  const cleanupIntervalMs = 6 * 60 * 60 * 1000;
+  cleanupScoreboards().catch((error) => {
+    console.warn("Scoreboard cleanup failed:", error);
   });
-
+  setInterval(() => {
+    cleanupScoreboards().catch((error) => {
+      console.warn("Scoreboard cleanup failed:", error);
+    });
+  }, cleanupIntervalMs);
   console.log(`Server listening on http://localhost:${port}`);
 });

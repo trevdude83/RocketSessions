@@ -44,17 +44,17 @@ export default function Landing() {
           <div className="landing-copy">
             <h1>Keep every match accountable.</h1>
             <p className="landing-lede">
-              This tracker captures live snapshots during play, flags new matches as they land,
+              This tracker captures scoreboard snapshots during play, turns matches into stats,
               and rolls everything into coaching-ready summaries for the next session.
             </p>
           </div>
           <div className="landing-hero-grid">
             <div className="landing-hero-card">
-              <h3>Live session polling</h3>
-              <p>Polls match history and captures fresh stats the moment a game ends.</p>
+              <h3>Scoreboard capture</h3>
+              <p>Uploads end-of-match scoreboards and extracts stats from the screen.</p>
               <div className="landing-stat">
-                <span className="note">Tracking loop</span>
-                <strong>Every 2-3 min</strong>
+                <span className="note">Capture source</span>
+                <strong>ScoreboardCam</strong>
               </div>
             </div>
             <div className="landing-hero-card">
@@ -85,8 +85,8 @@ export default function Landing() {
               <p className="note">Choose a saved team (or go solo), name your session, and start playing!</p>
             </div>
             <div className="panel-block">
-              <h3>2. Let it poll</h3>
-              <p className="note">Snapshots capture performance data like wins, losses, and ranked progress etc</p>
+              <h3>2. Capture scoreboards</h3>
+              <p className="note">Scoreboard images populate wins, losses, shots, saves, and goals.</p>
             </div>
             <div className="panel-block">
               <h3>3. End + review</h3>

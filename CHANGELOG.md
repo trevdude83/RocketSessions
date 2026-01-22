@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+- Switched to ScoreboardCam-driven match capture and session totals.
+- Added match score trends and game stats powered by extracted scoreboards.
+- Simplified session flow (manual baseline snapshots only; no polling refresh).
+- Added scoreboard retention cleanup job with automated file + ingest cleanup.
+- Refreshed landing page and docs to reflect cam-first workflow.
+
 ## 0.2.4
 - Added per-game stats table to help validate session capture.
 - Added robot loader animation for session and team coach generation.

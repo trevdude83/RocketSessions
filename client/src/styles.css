@@ -1715,6 +1715,17 @@ textarea {
   min-width: 1200px;
 }
 
+.team-history-table.scoreboard-ingests .team-history-row {
+  grid-template-columns: 0.6fr 0.9fr 0.9fr 0.9fr 0.9fr 7.2fr 1.2fr 0.9fr;
+  min-width: 1800px;
+}
+
+.signature-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
 .coach-audit-table {
   display: grid;
   gap: 8px;

@@ -1,11 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { db, getSetting } from "../db.js";
 
 type IngestRow = { id: number; receivedAt: string };
 
-async function main() {
+export async function cleanupScoreboards(): Promise<void> {
   const retentionRaw = getSetting("SCOREBOARD_RETENTION_DAYS");
   const retentionDays = retentionRaw ? Number(retentionRaw) : null;
   if (!Number.isFinite(retentionDays) || retentionDays === null) {
@@ -48,7 +48,9 @@ async function main() {
   console.log(`Cleaned ${ingests.length} scoreboard ingests older than ${cutoffIso}.`);
 }
 
-main().catch((error) => {
-  console.error("Scoreboard cleanup failed:", error);
-  process.exit(1);
-});
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  cleanupScoreboards().catch((error) => {
+    console.error("Scoreboard cleanup failed:", error);
+    process.exit(1);
+  });
+}

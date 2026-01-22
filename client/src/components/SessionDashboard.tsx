@@ -1,10 +1,10 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { backfillSessionSnapshots, endSession, getSessionDetail, getSummary, refreshSessionWithCooldown, shareSession, startSession, stopSession } from "../api";
+import { backfillSessionSnapshots, endSession, getSessionDetail, getSummary, shareSession, startSession, stopSession } from "../api";
 import { SessionDetail, SummaryResponse } from "../types";
 import PlayerCard from "./PlayerCard";
 import ChartsPanel from "./ChartsPanel";
-import RankChart from "./RankChart";
+import MatchScoreChart from "./MatchScoreChart";
 import TeamSessionStats from "./TeamSessionStats";
 import GameStatsTable from "./GameStatsTable";
 import CoachPanel from "./CoachPanel";
@@ -23,8 +23,6 @@ export default function SessionDashboard() {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshCooldownMs, setRefreshCooldownMs] = useState<number | null>(null);
   const [recomputing, setRecomputing] = useState(false);
   const [ending, setEnding] = useState(false);
   const [shareIdentity, setShareIdentity] = useState("");
@@ -68,37 +66,11 @@ export default function SessionDashboard() {
 
   const deltas = useMemo(() => summary?.deltas ?? {}, [summary]);
 
-  async function handleRefresh() {
-    if (!sessionId) return;
-    if (detail?.session.isEnded) return;
-    if (detail?.session.manualMode) return;
-    if (refreshCooldownMs && refreshCooldownMs > 0) return;
-    setRefreshing(true);
-    setError(null);
-    try {
-      const detailData = await refreshSessionWithCooldown(sessionId);
-      setDetail(detailData);
-      const summaryData = await getSummary(sessionId);
-      setSummary(summaryData);
-    } catch (err: any) {
-      const retryAfterMs = getRetryAfterMs(err);
-      if (typeof retryAfterMs === "number") {
-        setRefreshCooldownMs(retryAfterMs);
-        setError("Stats API rate limited. Refresh will unlock after cooldown.");
-      } else {
-        setError(err.message || "Refresh failed");
-      }
-    } finally {
-      setRefreshing(false);
-    }
-  }
-
   useEffect(() => {
     if (!sessionId) return;
     if (!detail) return;
-    if (detail.session.isEnded || !detail.session.isActive || detail.session.manualMode) return;
-    const intervalSeconds = Number(detail.session.pollingIntervalSeconds || 60);
-    const intervalMs = Math.max(10, intervalSeconds) * 1000;
+    if (detail.session.isEnded || !detail.session.isActive) return;
+    const intervalMs = 10000;
     const interval = setInterval(() => {
       void loadSessionData();
     }, intervalMs);
@@ -174,24 +146,9 @@ export default function SessionDashboard() {
     }
   }
 
-  useEffect(() => {
-    if (!refreshCooldownMs || refreshCooldownMs <= 0) return;
-    const interval = setInterval(() => {
-      setRefreshCooldownMs((prev) => {
-        if (!prev || prev <= 1000) return null;
-        return prev - 1000;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [refreshCooldownMs]);
-
-  const refreshLabel = refreshCooldownMs && refreshCooldownMs > 0
-    ? `Refresh (${Math.ceil(refreshCooldownMs / 1000)}s)`
-    : refreshing ? "Refreshing..." : "Refresh now";
   const canShare = Boolean(
     user && (user.role === "admin" || (detail?.session.userId != null && detail.session.userId === user.id))
   );
-  const isManual = detail?.session.manualMode === 1;
 
   if (loading) {
     return <div className="app">Loading session...</div>;
@@ -245,24 +202,13 @@ export default function SessionDashboard() {
                 </summary>
                 <div className="menu-panel">
                   <ThemeToggle />
-                  {!isManual && (
-                    <>
-                      <button
-                        onClick={handleRefresh}
-                        disabled={refreshing || (refreshCooldownMs ?? 0) > 0 || detail.session.isEnded}
-                      >
-                        {refreshLabel}
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={detail.session.isActive ? handleStop : handleStart}
-                        disabled={detail.session.isEnded}
-                      >
-                        {detail.session.isActive ? "Pause session" : "Continue session"}
-                      </button>
-                    </>
-                  )}
-                  {isManual && <span className="note">Manual mode: polling disabled.</span>}
+                  <button
+                    className="secondary"
+                    onClick={detail.session.isActive ? handleStop : handleStart}
+                    disabled={detail.session.isEnded}
+                  >
+                    {detail.session.isActive ? "Pause session" : "Continue session"}
+                  </button>
                   <button className="secondary" onClick={handleEnd} disabled={ending || detail.session.isEnded}>
                     {ending ? "Ending..." : "End session"}
                   </button>
@@ -300,7 +246,7 @@ export default function SessionDashboard() {
           <GameStatsTable sessionId={sessionId} gameCount={summary?.teamStats?.gameCount} />
           <ChartsPanel sessionId={sessionId} players={players} />
 
-          <RankChart sessionId={sessionId} players={players} />
+          <MatchScoreChart sessionId={sessionId} />
 
           <CoachPanel sessionId={sessionId} mode={detail.session.mode} />
           {canShare && (
@@ -345,15 +291,3 @@ export default function SessionDashboard() {
   );
 }
 
-function getRetryAfterMs(error: unknown): number | null {
-  const maybe = (error as { retryAfterMs?: number } | null)?.retryAfterMs;
-  if (typeof maybe === "number") return maybe;
-  const message = (error as { message?: string } | null)?.message;
-  if (!message) return null;
-  try {
-    const parsed = JSON.parse(message) as { retryAfterMs?: number };
-    return typeof parsed.retryAfterMs === "number" ? parsed.retryAfterMs : null;
-  } catch {
-    return null;
-  }
-}

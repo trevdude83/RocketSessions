@@ -13,9 +13,10 @@ Rocket League is a trademark of Psyonix, LLC. This project is unaffiliated with 
 ## What it does
 
 - Track Rocket League sessions across competitive modes (solo, 2v2, 3v3, 4v4).
-- Store snapshots locally in SQLite for reliable session history.
-- Show deltas and trend charts per session.
-- Support manual snapshot uploads when automated polling is unavailable.
+- Capture end-of-match scoreboards and convert them into match stats.
+- Store matches locally in SQLite for reliable session history.
+- Show per-session deltas and trend charts.
+- Support manual baseline snapshots to seed player cards.
 - Generate AI Coach reports grounded in the stored metrics.
 
 ## Tech stack
@@ -46,7 +47,7 @@ npm install
 
 2) Configure the player stats API:
 
-This project does not bundle any Rocket League APIs. You must supply your own player stats API credentials and endpoint, obtained through official, authorized channels in compliance with Psyonix/Epic policies.
+This project does not bundle any Rocket League APIs. If you plan to upload manual baseline snapshots, you must supply your own player stats API credentials and endpoint, obtained through official, authorized channels in compliance with Psyonix/Epic policies.
 
 You can set the API key and base URL in System Admin > API settings, or via a `.env` file at the repo root (see `.env.example`).
 
@@ -62,8 +63,8 @@ npm run dev
 ## Usage overview
 
 - Create a session for solo or team modes (2v2, 3v3, 4v4) using the relevant gamertags.
-- The server captures a baseline snapshot and polls on the configured interval.
-- Click "Refresh now" to trigger an immediate server-side fetch without starting another polling loop.
+- Upload a baseline snapshot per player if you want player cards to show starting values.
+- Scoreboard captures create matches and drive the session totals.
 - Stop or end a session to retain the stored history.
 
 ## User roles and first admin setup
@@ -106,7 +107,7 @@ Then run:
 npm run dev
 ```
 
-Open a session and click "Generate Coach Report" in the AI Coach panel. The server builds a compact coach packet from stored snapshots and the model returns a strict JSON report for the UI.
+Open a session and click "Generate Coach Report" in the AI Coach panel. The server builds a compact coach packet from stored match data (and any baseline snapshots) and the model returns a strict JSON report for the UI.
 
 Prompt tuning:
 - You can override the default **Session Coach** prompt and the **Team Coach** prompt separately in System Admin > AI Agent Settings.
@@ -120,15 +121,15 @@ RocketSessions can ingest end-of-match scoreboard images captured by a Raspberry
 How it works:
 - Register a device to receive a one-time device key.
 - The device polls for the active session context.
-- The device uploads 1–3 scoreboard images after each match.
+- The device uploads 1-3 scoreboard images after each match.
 - The server extracts stats with OpenAI Vision and adds a match to the active session.
 
 Key endpoints:
-- `POST /api/v1/scoreboard/devices/register` → returns `{ deviceId, deviceKey, pollUrl, uploadUrl }`
-- `GET /api/v1/scoreboard/devices/:deviceId/context` (Authorization: `Bearer <deviceKey>`)
-- `GET /api/v1/scoreboard/devices/:deviceId/status` (Authorization: `Bearer <deviceKey>`)
-- `POST /api/v1/scoreboard/ingest` (Authorization: `Bearer <deviceKey>`, multipart `images[]`)
-- `POST /api/v1/scoreboard/ingest/:ingestId/process` (Authorization: `Bearer <deviceKey>`)
+- `POST /api/v1/scoreboard/devices/register` -> returns `{ deviceId, deviceKey, pollUrl, uploadUrl }`
+- `GET /api/v1/scoreboard/devices/:deviceId/context` (Header: `X-Device-Key: <deviceKey>`)
+- `GET /api/v1/scoreboard/devices/:deviceId/status` (Header: `X-Device-Key: <deviceKey>`)
+- `POST /api/v1/scoreboard/ingest` (Header: `X-Device-Key: <deviceKey>`, multipart `images[]`)
+- `POST /api/v1/scoreboard/ingest/:ingestId/process` (Header: `X-Device-Key: <deviceKey>`)
 
 Notes:
 - The Pi only uploads images. All extraction, mapping, and aggregation happen server-side.
@@ -136,7 +137,7 @@ Notes:
 - If OpenAI is not configured, the extractor returns a stub payload and the ingest will fail gracefully.
 - Optional: set `OPENAI_VISION_MODEL` if you want a different model for images.
 - You can view devices, ingests, and retention settings in System Admin > ScoreboardCam.
-- Cleanup: run `npm --prefix server run cleanup:scoreboards` to delete stored ingest images older than the configured retention window.
+- Cleanup runs automatically based on the configured retention window.
 
 ## Demo
 
@@ -150,7 +151,6 @@ Create a demo session quickly:
 
 - AI Coach guidance is based on statistical aggregates (no replay or positional context).
 - If playlistAverage data is missing, coaching advice is less specific.
-- If the stats API rate limits or is unavailable, polling retries with exponential backoff and then skips that snapshot.
 - This is an unofficial personal project; API changes may break parsing.
 
 ## License

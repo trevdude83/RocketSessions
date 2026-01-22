@@ -226,7 +226,7 @@ export default function ScoreboardAdmin() {
           </div>
           {devices.length === 0 && <p>No devices registered yet.</p>}
           {devices.length > 0 && (
-            <div className="team-history-table extra">
+            <div className="team-history-table extra scoreboard-ingests">
               <div className="team-history-row header">
                 <span>Device</span>
                 <span>Last seen</span>
@@ -267,6 +267,7 @@ export default function ScoreboardAdmin() {
                 <span>Session</span>
                 <span>Team</span>
                 <span>Match</span>
+                <span>Signature</span>
                 <span>Received</span>
                 <span>Actions</span>
               </div>
@@ -279,6 +280,9 @@ export default function ScoreboardAdmin() {
                   <span>{ingest.sessionId ? `#${ingest.sessionId}` : "-"}</span>
                   <span>{ingest.teamId ? `#${ingest.teamId}` : "-"}</span>
                   <span>{ingest.matchId ? `#${ingest.matchId}` : "-"}</span>
+                  <span className="signature-cell" title={ingest.signatureKey ?? ""}>
+                    {formatSignatureKey(ingest.signatureKey)}
+                  </span>
                   <span>{formatDateTime(ingest.receivedAt)}</span>
                   <span>
                     <button
@@ -316,4 +320,9 @@ function formatDateTime(value: string | null | undefined) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "-";
   return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+}
+
+function formatSignatureKey(value: string | null | undefined) {
+  if (!value) return "-";
+  return value;
 }

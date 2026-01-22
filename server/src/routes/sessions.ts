@@ -1,6 +1,4 @@
-import { addSessionShare, db, createSession, createPlayers, createTeam, deleteSession, endSession, findTeamByRoster, getBaselineSnapshot, getDbMetrics, getLatestSnapshot, getLatestSnapshotByGamertag, getPlayersBySession, getRecentSnapshots, getSession, getSessionForUser, getSessionTeamStats, getTeam, getTeamForUser, getUserByEmail, getUserById, getUserByUsername, insertCoachAudit, insertCoachReport, insertSessionTeamStats, insertSnapshot, recordDbMetric, setSessionManualMode, setSessionMatchIndex, getLatestCoachReport, listCoachAudit, listCoachReports, listCoachReportsByTeam, listSessions, listSessionsForUser, listTeamStats, listTeams, listTeamsForUser, removeSessionShare, setSetting, getSetting, updateTeamName, insertTeamCoachReport, getLatestTeamCoachReport, listTeamCoachReports, getLatestAvatarUrlByGamertag } from "../db.js";
-import { captureManualSnapshot, initializeSession, startPolling, stopPolling } from "../sessionManager.js";
-import { fetchPlayerSessions, getRateLimitInfo, getRateLimitRemainingMs, getStatsApiStatus, isRateLimitError } from "../trn/trnClient.js";
+import { addSessionShare, db, createSession, createPlayers, createTeam, deleteSession, endSession, findTeamByRoster, getBaselineSnapshot, getDbMetrics, getLatestSnapshot, getLatestSnapshotByGamertag, getPlayersBySession, getRecentSnapshots, getSession, getSessionForUser, getSessionTeamStats, getTeam, getTeamForUser, getUserByEmail, getUserById, getUserByUsername, insertCoachAudit, insertCoachReport, insertSessionTeamStats, insertSnapshot, recordDbMetric, setSessionActive, setSessionManualMode, setSessionMatchIndex, getLatestCoachReport, listCoachAudit, listCoachReports, listCoachReportsByTeam, listSessions, listSessionsForUser, listTeamStats, listTeams, listTeamsForUser, removeSessionShare, setSetting, getSetting, updateTeamName, insertTeamCoachReport, getLatestTeamCoachReport, listTeamCoachReports, getLatestAvatarUrlByGamertag } from "../db.js";
 import { extractMetrics } from "../trn/extractMetrics.js";
 import { DerivedMetrics, PlayerInput, SessionRow } from "../types.js";
 import { buildCoachPacket } from "../coach/buildCoachPacket.js";
@@ -11,16 +9,12 @@ import {
   generateCoachReport,
 } from "../coach/aiCoach.js";
 import { Router } from "express";
-import { listPollingLogs } from "../sessionLogs.js";
 import { requireAdmin, requireAuth } from "../auth.js";
 import OpenAI from "openai";
 import { computeOpenAiCostUsd } from "../openaiCost.js";
 
 const router = Router();
 router.use(requireAuth);
-
-const sessionStatsCache = new Map<string, { wins: number | null; losses: number | null; winRate: number | null }>();
-const sessionStatsCooldown = new Map<string, number>();
 
 function resolveAccess(req: { auth?: { user: { role: string }; effectiveUser: { id: number }; impersonatedBy: unknown | null } }) {
   const impersonating = Boolean(req.auth?.impersonatedBy);
@@ -54,6 +48,92 @@ function normalizeModelIds(models: string[]): string[] {
   return Array.from(new Set(models)).sort();
 }
 
+function normalizeGamertag(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function numberOrZero(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+type MatchPlayerWithMeta = {
+  matchId: number;
+  playerId: number | null;
+  gamertag: string;
+  goals: number | null;
+  assists: number | null;
+  saves: number | null;
+  shots: number | null;
+  score: number | null;
+  isWinner: number | null;
+  createdAt: string;
+};
+
+function listMatchesForSession(sessionId: number): { id: number; createdAt: string }[] {
+  return db
+    .prepare("SELECT id, createdAt FROM matches WHERE sessionId = ? ORDER BY createdAt ASC")
+    .all(sessionId) as { id: number; createdAt: string }[];
+}
+
+function listMatchPlayersForSession(sessionId: number): MatchPlayerWithMeta[] {
+  return db
+    .prepare(
+      `SELECT mp.matchId,
+              mp.playerId,
+              mp.gamertag,
+              mp.goals,
+              mp.assists,
+              mp.saves,
+              mp.shots,
+              mp.score,
+              mp.isWinner,
+              m.createdAt as createdAt
+         FROM match_players mp
+         JOIN matches m ON m.id = mp.matchId
+        WHERE m.sessionId = ?
+        ORDER BY m.createdAt ASC, mp.id ASC`
+    )
+    .all(sessionId) as MatchPlayerWithMeta[];
+}
+
+function buildDerivedTotals(input: {
+  wins: number;
+  losses: number;
+  goals: number;
+  assists: number;
+  saves: number;
+  shots: number;
+  score: number;
+  avatarUrl: string | null;
+  lastUpdated: string | null;
+}): DerivedMetrics {
+  const { wins, losses, goals, assists, saves, shots, score, avatarUrl, lastUpdated } = input;
+  const winRate = wins + losses > 0 ? wins / (wins + losses) : null;
+  const goalShotRatio = shots > 0 ? goals / shots : null;
+  return {
+    lastUpdated,
+    currentSeason: null,
+    wins,
+    losses,
+    goals,
+    assists,
+    saves,
+    shots,
+    score,
+    winRate,
+    goalShotRatio,
+    mmr: null,
+    rank: null,
+    rankTierIndex: null,
+    rankDivisionIndex: null,
+    rankPoints: null,
+    rankIconUrl: null,
+    avatarUrl,
+    playlists: null,
+    playlistAverages: null
+  };
+}
+
 function toSessionDetail(sessionId: number, sessionRow?: SessionRow) {
   const session = sessionRow ?? getSession(sessionId);
   if (!session) return null;
@@ -62,23 +142,85 @@ function toSessionDetail(sessionId: number, sessionRow?: SessionRow) {
   const baselineByPlayerId: Record<number, unknown> = {};
   const latestByPlayerId: Record<number, unknown> = {};
 
+  const totalsByPlayer = new Map<number, { wins: number; losses: number; goals: number; assists: number; saves: number; shots: number; score: number; latestAt: string | null; hasMatches: boolean }>();
+  const normalizedRoster = new Map<string, number>();
+  players.forEach((player) => {
+    normalizedRoster.set(normalizeGamertag(player.gamertag), player.id);
+    totalsByPlayer.set(player.id, {
+      wins: 0,
+      losses: 0,
+      goals: 0,
+      assists: 0,
+      saves: 0,
+      shots: 0,
+      score: 0,
+      latestAt: null,
+      hasMatches: false
+    });
+  });
+
+  const matchPlayers = listMatchPlayersForSession(sessionId);
+  matchPlayers.forEach((row) => {
+    const mappedId =
+      typeof row.playerId === "number"
+        ? row.playerId
+        : normalizedRoster.get(normalizeGamertag(row.gamertag)) ?? null;
+    if (!mappedId || !totalsByPlayer.has(mappedId)) return;
+    const totals = totalsByPlayer.get(mappedId)!;
+    totals.goals += numberOrZero(row.goals);
+    totals.assists += numberOrZero(row.assists);
+    totals.saves += numberOrZero(row.saves);
+    totals.shots += numberOrZero(row.shots);
+    totals.score += numberOrZero(row.score);
+    if (row.isWinner === 1) totals.wins += 1;
+    if (row.isWinner === 0) totals.losses += 1;
+    totals.hasMatches = true;
+    totals.latestAt = row.createdAt;
+  });
+
   players.forEach((player) => {
     const baseline = getBaselineSnapshot(player.id);
-    const latest = getLatestSnapshot(player.id);
+    const baselineDerived = parseJson<DerivedMetrics>(baseline?.derivedJson || "");
+    const latestSnapshot = getLatestSnapshot(player.id);
+    const latestDerived = parseJson<DerivedMetrics>(latestSnapshot?.derivedJson || "");
+    const totals = totalsByPlayer.get(player.id);
+    const avatarUrl = baselineDerived?.avatarUrl ?? latestDerived?.avatarUrl ?? null;
+
     baselineByPlayerId[player.id] = baseline
       ? {
           id: baseline.id,
           playerId: player.id,
           capturedAt: baseline.capturedAt,
-          derived: parseJson<DerivedMetrics>(baseline.derivedJson)
+          derived: baselineDerived
         }
       : null;
-    latestByPlayerId[player.id] = latest
+
+    if (totals && totals.hasMatches) {
+      latestByPlayerId[player.id] = {
+        id: latestSnapshot?.id ?? 0,
+        playerId: player.id,
+        capturedAt: totals.latestAt ?? latestSnapshot?.capturedAt ?? baseline?.capturedAt ?? session.createdAt,
+        derived: buildDerivedTotals({
+          wins: totals.wins,
+          losses: totals.losses,
+          goals: totals.goals,
+          assists: totals.assists,
+          saves: totals.saves,
+          shots: totals.shots,
+          score: totals.score,
+          avatarUrl,
+          lastUpdated: totals.latestAt ?? null
+        })
+      };
+      return;
+    }
+
+    latestByPlayerId[player.id] = baseline
       ? {
-          id: latest.id,
+          id: baseline.id,
           playerId: player.id,
-          capturedAt: latest.capturedAt,
-          derived: parseJson<DerivedMetrics>(latest.derivedJson)
+          capturedAt: baseline.capturedAt,
+          derived: baselineDerived
         }
       : null;
   });
@@ -334,14 +476,9 @@ router.post("/sessions", async (req, res) => {
   );
   createPlayers(session.id, resolvedPlayers);
 
-  if (!manualModeEnabled) {
-    await initializeSession(session.id);
-    startPolling(session.id, interval);
-  }
-
-  const detail = toSessionDetail(session.id, session);
-  res.status(201).json(detail);
-});
+    const detail = toSessionDetail(session.id, session);
+    res.status(201).json(detail);
+  });
 
 router.post("/sessions/:id/share", (req, res) => {
   const sessionId = Number(req.params.id);
@@ -382,9 +519,8 @@ router.post("/sessions/:id/stop", (req, res) => {
   const { userId, isAdmin } = resolveAccess(req);
   const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
-  if (session.manualMode) return res.status(400).json({ error: "Manual sessions do not support polling." });
   if (session.isEnded) return res.status(400).json({ error: "Session has ended" });
-  stopPolling(sessionId);
+  setSessionActive(sessionId, false);
   res.json({ ok: true });
 });
 
@@ -393,7 +529,6 @@ router.delete("/sessions/:id", (req, res) => {
   const { userId, isAdmin } = resolveAccess(req);
   const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
-  stopPolling(sessionId);
   deleteSession(sessionId);
   res.json({ ok: true });
 });
@@ -403,9 +538,8 @@ router.post("/sessions/:id/start", async (req, res) => {
   const { userId, isAdmin } = resolveAccess(req);
   const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
-  if (session.manualMode) return res.status(400).json({ error: "Manual sessions do not support polling." });
   if (session.isEnded) return res.status(400).json({ error: "Session has ended" });
-  startPolling(sessionId, session.pollingIntervalSeconds);
+  setSessionActive(sessionId, true);
   res.json({ ok: true });
 });
 
@@ -417,9 +551,6 @@ router.post("/sessions/:id/manual-mode", (req, res) => {
   if (session.isEnded) return res.status(400).json({ error: "Session has ended" });
   const enabled = Boolean(req.body?.enabled);
   setSessionManualMode(sessionId, enabled);
-  if (enabled) {
-    stopPolling(sessionId);
-  }
   res.json({ ok: true, manualMode: enabled ? 1 : 0 });
 });
 
@@ -430,7 +561,6 @@ router.post("/sessions/:id/end", async (req, res) => {
   if (!session) return res.status(404).json({ error: "Session not found" });
   if (session.isEnded) return res.status(400).json({ error: "Session already ended" });
 
-  stopPolling(sessionId);
   endSession(sessionId);
 
   const includeCoach = typeof req.body?.includeCoachOnEnd === "boolean"
@@ -568,30 +698,6 @@ router.post("/sessions/:id/end", async (req, res) => {
 
   const detail = toSessionDetail(sessionId, session);
   res.json({ session: detail?.session, teamStatsWritten, coachReportId });
-});
-
-router.post("/sessions/:id/refresh", async (req, res) => {
-  const sessionId = Number(req.params.id);
-  const { userId, isAdmin } = resolveAccess(req);
-  const session = getSessionForUser(sessionId, userId, isAdmin);
-  if (!session) return res.status(404).json({ error: "Session not found" });
-  if (session.manualMode) {
-    return res.status(400).json({ error: "Manual sessions do not support stats API refresh." });
-  }
-  const remaining = getRateLimitRemainingMs();
-  if (remaining > 0) {
-    return res.status(429).json({ error: "Stats API rate limited. Try again later.", retryAfterMs: remaining });
-  }
-  try {
-    await captureManualSnapshot(sessionId);
-  } catch (error) {
-    if (isRateLimitError(error)) {
-      return res.status(429).json({ error: "Stats API rate limited. Try again later.", retryAfterMs: error.retryAfterMs });
-    }
-    throw error;
-  }
-  const detail = toSessionDetail(sessionId, session);
-  res.json(detail);
 });
 
 function toNumber(value: unknown): number | null {
@@ -775,98 +881,102 @@ function computeSessionTeamStats(sessionId: number) {
   const focusPlaylistId = getFocusPlaylistId(session.mode);
 
   const deltasByPlayer: Record<number, Record<string, number | null>> = {};
+  const normalizedRoster = new Map<string, number>();
+  players.forEach((player) => {
+    normalizedRoster.set(normalizeGamertag(player.gamertag), player.id);
+  });
+
+  const matchRows = listMatchesForSession(sessionId);
+  const matchPlayers = listMatchPlayersForSession(sessionId);
+  const matchPlayersByMatch = new Map<number, MatchPlayerWithMeta[]>();
+  matchPlayers.forEach((row) => {
+    if (!matchPlayersByMatch.has(row.matchId)) {
+      matchPlayersByMatch.set(row.matchId, []);
+    }
+    matchPlayersByMatch.get(row.matchId)!.push(row);
+  });
+
+  const totalsByPlayer = new Map<number, { wins: number; losses: number; goals: number; assists: number; saves: number; shots: number; score: number; matchesPlayed: number }>();
+  players.forEach((player) => {
+    totalsByPlayer.set(player.id, { wins: 0, losses: 0, goals: 0, assists: 0, saves: 0, shots: 0, score: 0, matchesPlayed: 0 });
+  });
+
+  matchPlayers.forEach((row) => {
+    const mappedId =
+      typeof row.playerId === "number"
+        ? row.playerId
+        : normalizedRoster.get(normalizeGamertag(row.gamertag)) ?? null;
+    if (!mappedId || !totalsByPlayer.has(mappedId)) return;
+    const totals = totalsByPlayer.get(mappedId)!;
+    totals.goals += numberOrZero(row.goals);
+    totals.assists += numberOrZero(row.assists);
+    totals.saves += numberOrZero(row.saves);
+    totals.shots += numberOrZero(row.shots);
+    totals.score += numberOrZero(row.score);
+    if (row.isWinner === 1) totals.wins += 1;
+    if (row.isWinner === 0) totals.losses += 1;
+    totals.matchesPlayed += 1;
+  });
+
+  players.forEach((player) => {
+    const totals = totalsByPlayer.get(player.id);
+    deltasByPlayer[player.id] = {
+      wins: totals?.wins ?? null,
+      losses: totals?.losses ?? null,
+      goals: totals?.goals ?? null,
+      assists: totals?.assists ?? null,
+      saves: totals?.saves ?? null,
+      shots: totals?.shots ?? null,
+      matchesPlayed: totals?.matchesPlayed ?? null
+    };
+  });
+
+  let teamWins = 0;
+  let teamLosses = 0;
+  matchRows.forEach((match) => {
+    const rows = matchPlayersByMatch.get(match.id) ?? [];
+    const sessionRows = rows.filter((row) => {
+      if (typeof row.playerId === "number") {
+        return players.some((player) => player.id === row.playerId);
+      }
+      const mappedId = normalizedRoster.get(normalizeGamertag(row.gamertag));
+      return typeof mappedId === "number";
+    });
+    if (sessionRows.length === 0) return;
+    if (sessionRows.some((row) => row.isWinner === 1)) {
+      teamWins += 1;
+    } else if (sessionRows.some((row) => row.isWinner === 0)) {
+      teamLosses += 1;
+    }
+  });
+
   const teamTotals = {
-    wins: null as number | null,
-    losses: null as number | null,
+    wins: teamWins,
+    losses: teamLosses,
     goals: 0,
     assists: 0,
     saves: 0,
     shots: 0,
-    matchesPlayed: null as number | null
+    matchesPlayed: matchRows.length
   };
 
-  players.forEach((player) => {
-    const baseline = getBaselineSnapshot(player.id);
-    const latest = getLatestSnapshot(player.id);
-    const baselineDerived = parseJson<DerivedMetrics>(baseline?.derivedJson || "");
-    const latestDerived = parseJson<DerivedMetrics>(latest?.derivedJson || "");
-    const playlistBase = baselineDerived?.playlists?.[focusPlaylistId] ?? null;
-    const playlistLatest = latestDerived?.playlists?.[focusPlaylistId] ?? null;
-
-    const winsDelta = toNumber(latestDerived?.wins) !== null && toNumber(baselineDerived?.wins) !== null
-      ? (latestDerived?.wins as number) - (baselineDerived?.wins as number)
-      : null;
-    const baselineLosses = toNumber(baselineDerived?.losses);
-    const latestLosses = toNumber(latestDerived?.losses);
-    let lossesDelta = baselineLosses !== null && latestLosses !== null
-      ? latestLosses - baselineLosses
-      : null;
-    const goalsDelta = toNumber(latestDerived?.goals) !== null && toNumber(baselineDerived?.goals) !== null
-      ? (latestDerived?.goals as number) - (baselineDerived?.goals as number)
-      : null;
-    const assistsDelta = toNumber(latestDerived?.assists) !== null && toNumber(baselineDerived?.assists) !== null
-      ? (latestDerived?.assists as number) - (baselineDerived?.assists as number)
-      : null;
-    const savesDelta = toNumber(latestDerived?.saves) !== null && toNumber(baselineDerived?.saves) !== null
-      ? (latestDerived?.saves as number) - (baselineDerived?.saves as number)
-      : null;
-    const shotsDelta = toNumber(latestDerived?.shots) !== null && toNumber(baselineDerived?.shots) !== null
-      ? (latestDerived?.shots as number) - (baselineDerived?.shots as number)
-      : null;
-    const matchesPlayedDelta = toNumber(playlistLatest?.matchesPlayed) !== null && toNumber(playlistBase?.matchesPlayed) !== null
-      ? (playlistLatest?.matchesPlayed as number) - (playlistBase?.matchesPlayed as number)
-      : null;
-    if (lossesDelta === null && typeof winsDelta === "number" && typeof matchesPlayedDelta === "number") {
-      const computed = matchesPlayedDelta - winsDelta;
-      lossesDelta = computed >= 0 ? computed : null;
-    }
-
-    deltasByPlayer[player.id] = {
-      wins: winsDelta,
-      losses: lossesDelta,
-      goals: goalsDelta,
-      assists: assistsDelta,
-      saves: savesDelta,
-      shots: shotsDelta,
-      matchesPlayed: matchesPlayedDelta
-    };
-
-    if (typeof goalsDelta === "number") teamTotals.goals += goalsDelta;
-    if (typeof assistsDelta === "number") teamTotals.assists += assistsDelta;
-    if (typeof savesDelta === "number") teamTotals.saves += savesDelta;
-    if (typeof shotsDelta === "number") teamTotals.shots += shotsDelta;
-
-    if (typeof winsDelta === "number") {
-      teamTotals.wins = teamTotals.wins === null ? winsDelta : Math.max(teamTotals.wins, winsDelta);
-    }
-    if (typeof lossesDelta === "number") {
-      teamTotals.losses = teamTotals.losses === null ? lossesDelta : Math.max(teamTotals.losses, lossesDelta);
-    }
-    if (typeof matchesPlayedDelta === "number") {
-      teamTotals.matchesPlayed = teamTotals.matchesPlayed === null ? matchesPlayedDelta : Math.max(teamTotals.matchesPlayed, matchesPlayedDelta);
-    }
+  totalsByPlayer.forEach((totals) => {
+    teamTotals.goals += totals.goals;
+    teamTotals.assists += totals.assists;
+    teamTotals.saves += totals.saves;
+    teamTotals.shots += totals.shots;
   });
 
   const wins = teamTotals.wins;
   const losses = teamTotals.losses;
   const matchesPlayed = teamTotals.matchesPlayed;
-  const winRate =
-    typeof wins === "number" && typeof losses === "number" && wins + losses > 0
-      ? wins / (wins + losses)
-      : typeof wins === "number" && typeof matchesPlayed === "number" && matchesPlayed > 0
-      ? wins / matchesPlayed
-      : null;
+  const winRate = wins + losses > 0 ? wins / (wins + losses) : null;
 
-  const goalsPerGame =
-    typeof matchesPlayed === "number" && matchesPlayed > 0 ? teamTotals.goals / matchesPlayed : null;
-  const shotsPerGame =
-    typeof matchesPlayed === "number" && matchesPlayed > 0 ? teamTotals.shots / matchesPlayed : null;
-  const savesPerGame =
-    typeof matchesPlayed === "number" && matchesPlayed > 0 ? teamTotals.saves / matchesPlayed : null;
-  const assistsPerGame =
-    typeof matchesPlayed === "number" && matchesPlayed > 0 ? teamTotals.assists / matchesPlayed : null;
-  const shotAccuracy =
-    teamTotals.shots > 0 ? teamTotals.goals / teamTotals.shots : null;
+  const goalsPerGame = matchesPlayed > 0 ? teamTotals.goals / matchesPlayed : null;
+  const shotsPerGame = matchesPlayed > 0 ? teamTotals.shots / matchesPlayed : null;
+  const savesPerGame = matchesPlayed > 0 ? teamTotals.saves / matchesPlayed : null;
+  const assistsPerGame = matchesPlayed > 0 ? teamTotals.assists / matchesPlayed : null;
+  const shotAccuracy = teamTotals.shots > 0 ? teamTotals.goals / teamTotals.shots : null;
 
   const derivedTeam = {
     wins,
@@ -895,116 +1005,6 @@ function computeSessionTeamStats(sessionId: number) {
     records
   };
 }
-
-
-async function computeSessionStats(
-  sessionCreatedAt: string,
-  platform: string,
-  gamertag: string,
-  mode: string
-): Promise<{ wins: number | null; losses: number | null; winRate: number | null }> {
-  const cacheKey = `${platform}:${gamertag}:${mode}`.toLowerCase();
-  const cooldownUntil = sessionStatsCooldown.get(cacheKey) ?? 0;
-  if (cooldownUntil > Date.now()) {
-    return sessionStatsCache.get(cacheKey) ?? { wins: null, losses: null, winRate: null };
-  }
-
-  try {
-    const sessions = normalizeSessions(await fetchPlayerSessions(platform as any, gamertag));
-    const since = new Date(sessionCreatedAt).getTime();
-    let wins = 0;
-    let matches = 0;
-
-    const matchesList = filterMatchesForMode(
-      sessions.flatMap((session) => session?.matches ?? (Array.isArray(session) ? session : [])),
-      mode
-    );
-    matchesList.forEach((match: any) => {
-      const dateValue = match?.date instanceof Date ? match.date.getTime() : new Date(match?.date).getTime();
-      if (!Number.isFinite(dateValue) || dateValue < since) return;
-      const matchWins = toNumber(match?.stats?.wins);
-      const matchPlayed = toNumber(match?.stats?.matchesPlayed);
-      if (matchWins !== null) wins += matchWins;
-      if (matchPlayed !== null) matches += matchPlayed;
-    });
-
-    if (matches <= 0) {
-      return { wins: null, losses: null, winRate: null };
-    }
-
-    const losses = matches - wins;
-    const winRate = wins / matches;
-    const result = {
-      wins,
-      losses: losses >= 0 ? losses : null,
-      winRate
-    };
-    sessionStatsCache.set(cacheKey, result);
-    return result;
-  } catch (error) {
-    if (isRateLimitError(error)) {
-      sessionStatsCooldown.set(cacheKey, Date.now() + error.retryAfterMs);
-      return sessionStatsCache.get(cacheKey) ?? { wins: null, losses: null, winRate: null };
-    }
-    console.warn(`Failed to fetch sessions for ${gamertag}:`, error);
-    return { wins: null, losses: null, winRate: null };
-  }
-}
-
-function computeSnapshotSessionStats(
-  sessionId: number,
-  playerId: number,
-  mode: string
-): { wins: number | null; losses: number | null; winRate: number | null } {
-  const baseline = db
-    .prepare(
-      "SELECT derivedJson FROM snapshots WHERE sessionId = ? AND playerId = ? ORDER BY capturedAt ASC LIMIT 1"
-    )
-    .get(sessionId, playerId) as { derivedJson: string } | undefined;
-  const latest = db
-    .prepare(
-      "SELECT derivedJson FROM snapshots WHERE sessionId = ? AND playerId = ? ORDER BY capturedAt DESC LIMIT 1"
-    )
-    .get(sessionId, playerId) as { derivedJson: string } | undefined;
-
-  const baselineDerived = parseJson<DerivedMetrics>(baseline?.derivedJson || "");
-  const latestDerived = parseJson<DerivedMetrics>(latest?.derivedJson || "");
-  if (!baselineDerived || !latestDerived) {
-    return { wins: null, losses: null, winRate: null };
-  }
-
-  const winsDelta =
-    typeof latestDerived.wins === "number" && typeof baselineDerived.wins === "number"
-      ? latestDerived.wins - baselineDerived.wins
-      : null;
-  const lossesDelta =
-    typeof latestDerived.losses === "number" && typeof baselineDerived.losses === "number"
-      ? latestDerived.losses - baselineDerived.losses
-      : null;
-
-  const focusPlaylistId = getFocusPlaylistId(mode);
-  const playlistBase = baselineDerived.playlists?.[focusPlaylistId] ?? null;
-  const playlistLatest = latestDerived.playlists?.[focusPlaylistId] ?? null;
-  const matchesDelta =
-    toNumber(playlistLatest?.matchesPlayed) !== null && toNumber(playlistBase?.matchesPlayed) !== null
-      ? (playlistLatest?.matchesPlayed as number) - (playlistBase?.matchesPlayed as number)
-      : null;
-
-  let wins = winsDelta;
-  let losses = lossesDelta;
-  if (losses === null && typeof wins === "number" && typeof matchesDelta === "number") {
-    const computedLosses = matchesDelta - wins;
-    losses = computedLosses >= 0 ? computedLosses : null;
-  }
-
-  const winRate =
-    typeof wins === "number" && typeof losses === "number" && wins + losses > 0
-      ? wins / (wins + losses)
-      : null;
-
-  return { wins: wins ?? null, losses: losses ?? null, winRate };
-}
-
 router.get("/sessions/:id/summary", async (req, res) => {
   const sessionId = Number(req.params.id);
   const { userId, isAdmin } = resolveAccess(req);
@@ -1015,114 +1015,115 @@ router.get("/sessions/:id/summary", async (req, res) => {
   const deltas: Record<number, Record<string, number | null>> = {};
   const comparisons: Record<string, number | null> = {};
   const sessionStats: Record<number, { wins: number | null; losses: number | null; winRate: number | null }> = {};
-  let teamWins: number | null = null;
-  let teamLosses: number | null = null;
 
-  const metrics = [
+  const normalizedRoster = new Map<string, number>();
+  players.forEach((player) => {
+    normalizedRoster.set(normalizeGamertag(player.gamertag), player.id);
+  });
+
+  const matchRows = listMatchesForSession(sessionId);
+  const matchPlayers = listMatchPlayersForSession(sessionId);
+  const matchPlayersByMatch = new Map<number, MatchPlayerWithMeta[]>();
+  matchPlayers.forEach((row) => {
+    if (!matchPlayersByMatch.has(row.matchId)) {
+      matchPlayersByMatch.set(row.matchId, []);
+    }
+    matchPlayersByMatch.get(row.matchId)!.push(row);
+  });
+
+  const totalsByPlayer = new Map<number, { wins: number; losses: number; goals: number; assists: number; saves: number; shots: number; score: number; latestAt: string | null }>();
+  players.forEach((player) => {
+    totalsByPlayer.set(player.id, { wins: 0, losses: 0, goals: 0, assists: 0, saves: 0, shots: 0, score: 0, latestAt: null });
+  });
+
+  matchPlayers.forEach((row) => {
+    const mappedId =
+      typeof row.playerId === "number"
+        ? row.playerId
+        : normalizedRoster.get(normalizeGamertag(row.gamertag)) ?? null;
+    if (!mappedId || !totalsByPlayer.has(mappedId)) return;
+    const totals = totalsByPlayer.get(mappedId)!;
+    totals.goals += numberOrZero(row.goals);
+    totals.assists += numberOrZero(row.assists);
+    totals.saves += numberOrZero(row.saves);
+    totals.shots += numberOrZero(row.shots);
+    totals.score += numberOrZero(row.score);
+    if (row.isWinner === 1) totals.wins += 1;
+    if (row.isWinner === 0) totals.losses += 1;
+    totals.latestAt = row.createdAt;
+  });
+
+  let teamWins = 0;
+  let teamLosses = 0;
+  matchRows.forEach((match) => {
+    const rows = matchPlayersByMatch.get(match.id) ?? [];
+    const sessionRows = rows.filter((row) => {
+      if (typeof row.playerId === "number") {
+        return players.some((player) => player.id === row.playerId);
+      }
+      const mappedId = normalizedRoster.get(normalizeGamertag(row.gamertag));
+      return typeof mappedId === "number";
+    });
+    if (sessionRows.length === 0) return;
+    if (sessionRows.some((row) => row.isWinner === 1)) {
+      teamWins += 1;
+    } else if (sessionRows.some((row) => row.isWinner === 0)) {
+      teamLosses += 1;
+    }
+  });
+
+  const teamGameCount = matchRows.length;
+  const teamWinRate = teamWins + teamLosses > 0 ? teamWins / (teamWins + teamLosses) : null;
+
+  const metrics: (keyof DerivedMetrics)[] = [
     "wins",
     "losses",
     "goals",
     "assists",
     "saves",
     "shots",
+    "score",
     "winRate",
-    "goalShotRatio",
-    "mmr"
+    "goalShotRatio"
   ];
 
   players.forEach((player) => {
+    const totals = totalsByPlayer.get(player.id);
     const baseline = getBaselineSnapshot(player.id);
-    const latest = getLatestSnapshot(player.id);
     const baselineDerived = parseJson<DerivedMetrics>(baseline?.derivedJson || "");
-    const latestDerived = parseJson<DerivedMetrics>(latest?.derivedJson || "");
+    const latestDerived = totals
+      ? buildDerivedTotals({
+          wins: totals.wins,
+          losses: totals.losses,
+          goals: totals.goals,
+          assists: totals.assists,
+          saves: totals.saves,
+          shots: totals.shots,
+          score: totals.score,
+          avatarUrl: baselineDerived?.avatarUrl ?? null,
+          lastUpdated: totals.latestAt
+        })
+      : null;
 
     deltas[player.id] = {};
-
     metrics.forEach((metric) => {
-      const baseValue = baselineDerived?.[metric as keyof DerivedMetrics] ?? null;
-      const latestValue = latestDerived?.[metric as keyof DerivedMetrics] ?? null;
+      const baseValue = baselineDerived?.[metric] ?? null;
+      const latestValue = latestDerived?.[metric] ?? null;
       if (typeof baseValue === "number" && typeof latestValue === "number") {
         deltas[player.id][metric] = latestValue - baseValue;
+      } else if (typeof latestValue === "number" && baseValue === null) {
+        deltas[player.id][metric] = latestValue;
       } else {
         deltas[player.id][metric] = null;
       }
     });
+
+    sessionStats[player.id] = {
+      wins: latestDerived?.wins ?? null,
+      losses: latestDerived?.losses ?? null,
+      winRate: latestDerived?.winRate ?? null
+    };
   });
-
-  if (session.manualMode) {
-    players.forEach((player) => {
-      sessionStats[player.id] = computeSnapshotSessionStats(sessionId, player.id, session.mode);
-    });
-  } else {
-    await Promise.all(
-      players.map(async (player) => {
-        sessionStats[player.id] = await computeSessionStats(
-          session.createdAt,
-          player.platform,
-          player.gamertag,
-          session.mode
-        );
-      })
-    );
-  }
-
-  const sessionValues = Object.values(sessionStats);
-  const winsValues = sessionValues.map((value) => value.wins).filter((v) => typeof v === "number") as number[];
-  const lossesValues = sessionValues.map((value) => value.losses).filter((v) => typeof v === "number") as number[];
-  if (winsValues.length > 0) {
-    teamWins = Math.max(...winsValues);
-  }
-  if (lossesValues.length > 0) {
-    teamLosses = Math.max(...lossesValues);
-  }
-
-  if (teamWins === null || teamLosses === null) {
-    const deltaWins = players
-      .map((player) => deltas[player.id]?.wins)
-      .filter((value) => typeof value === "number") as number[];
-    const deltaLosses = players
-      .map((player) => deltas[player.id]?.losses)
-      .filter((value) => typeof value === "number") as number[];
-
-    if (teamWins === null && deltaWins.length > 0) {
-      teamWins = Math.max(...deltaWins);
-    }
-    if (teamLosses === null && deltaLosses.length > 0) {
-      teamLosses = Math.max(...deltaLosses);
-    }
-    if (teamLosses === null && typeof teamWins === "number" && (session.matchIndex ?? 0) > 0) {
-      const computedLosses = (session.matchIndex ?? 0) - teamWins;
-      teamLosses = computedLosses >= 0 ? computedLosses : null;
-    }
-  }
-
-  const focusPlaylistId = getFocusPlaylistId(session.mode);
-  const matchesPlayedValues = players.map((player) => {
-    const baseline = getBaselineSnapshot(player.id);
-    const latest = getLatestSnapshot(player.id);
-    const baselineDerived = parseJson<DerivedMetrics>(baseline?.derivedJson || "");
-    const latestDerived = parseJson<DerivedMetrics>(latest?.derivedJson || "");
-    const playlistBase = baselineDerived?.playlists?.[focusPlaylistId] ?? null;
-    const playlistLatest = latestDerived?.playlists?.[focusPlaylistId] ?? null;
-    const delta = toNumber(playlistLatest?.matchesPlayed) !== null && toNumber(playlistBase?.matchesPlayed) !== null
-      ? (playlistLatest?.matchesPlayed as number) - (playlistBase?.matchesPlayed as number)
-      : null;
-    return typeof delta === "number" ? delta : null;
-  }).filter((value): value is number => typeof value === "number");
-
-  let teamGameCount = matchesPlayedValues.length > 0 ? Math.max(...matchesPlayedValues) : (session.matchIndex ?? 0);
-  if (teamGameCount <= 0 && typeof teamWins === "number") {
-    teamGameCount = teamWins + (typeof teamLosses === "number" ? teamLosses : 0);
-  }
-  if (teamLosses === null && typeof teamWins === "number" && teamGameCount > 0) {
-    const computedLosses = teamGameCount - teamWins;
-    teamLosses = computedLosses >= 0 ? computedLosses : null;
-  }
-
-  const teamWinRate =
-    typeof teamWins === "number" && typeof teamLosses === "number" && teamWins + teamLosses > 0
-      ? teamWins / (teamWins + teamLosses)
-      : null;
 
   metrics.forEach((metric) => {
     const [p1, p2] = players;
@@ -1162,98 +1163,81 @@ router.get("/sessions/:id/timeseries", (req, res) => {
   const session = getSessionForUser(sessionId, userId, isAdmin);
   if (!session) return res.status(404).json({ error: "Session not found" });
 
-  const snapshots = db
-    .prepare(
-      "SELECT capturedAt, derivedJson, matchIndex FROM snapshots WHERE sessionId = ? AND playerId = ? ORDER BY capturedAt ASC"
-    )
-    .all(sessionId, playerId) as { capturedAt: string; derivedJson: string; matchIndex: number | null }[];
-
-  const baseline = db
-    .prepare("SELECT derivedJson FROM snapshots WHERE playerId = ? ORDER BY capturedAt ASC LIMIT 1")
-    .get(playerId) as { derivedJson: string } | undefined;
-  const baselineDerived = parseJson<DerivedMetrics>(baseline?.derivedJson || "");
-
-  const latestByMatchIndex = new Map<number, { t: number; derived: DerivedMetrics | null }>();
-  const hasMatchIndex = snapshots.some((snapshot) => snapshot.matchIndex !== null && snapshot.matchIndex !== undefined);
-  if (hasMatchIndex) {
-    snapshots.forEach((snapshot) => {
-      if (snapshot.matchIndex === null || snapshot.matchIndex === undefined) return;
-      const derived = parseJson<DerivedMetrics>(snapshot.derivedJson);
-      latestByMatchIndex.set(snapshot.matchIndex, { t: snapshot.matchIndex, derived });
-    });
-  } else {
-    const byCaptured = new Map<string, number>();
-    let index = 0;
-    snapshots.forEach((snapshot) => {
-      if (!byCaptured.has(snapshot.capturedAt)) {
-        index += 1;
-        byCaptured.set(snapshot.capturedAt, index);
-      }
-      const derived = parseJson<DerivedMetrics>(snapshot.derivedJson);
-      const t = byCaptured.get(snapshot.capturedAt) ?? index;
-      latestByMatchIndex.set(t, { t, derived });
-    });
+  const matches = listMatchesForSession(sessionId);
+  if (matches.length === 0) {
+    return res.json([]);
   }
 
-  const additiveMetrics = new Set([
-    "wins",
-    "losses",
-    "goals",
-    "assists",
-    "saves",
-    "shots",
-    "mmr"
-  ]);
+  const player = getPlayersBySession(sessionId).find((entry) => entry.id === playerId);
+  if (!player) return res.json([]);
 
-  const points = Array.from(latestByMatchIndex.values())
-    .sort((a, b) => a.t - b.t)
-    .map((snapshot) => {
-    const derived = snapshot.derived;
-    if (!derived) return { t: snapshot.t, v: null };
+  const normalized = normalizeGamertag(player.gamertag);
+  const matchPlayers = listMatchPlayersForSession(sessionId).filter((row) => {
+    if (typeof row.playerId === "number") return row.playerId === playerId;
+    return normalizeGamertag(row.gamertag) === normalized;
+  });
 
-    if (metric === "winRate") {
-      const wins = derived.wins;
-      const losses = derived.losses;
-      const baseWins = baselineDerived?.wins ?? null;
-      const baseLosses = baselineDerived?.losses ?? null;
-      if (typeof wins === "number" && typeof losses === "number" && typeof baseWins === "number" && typeof baseLosses === "number") {
-        const deltaWins = wins - baseWins;
-        const deltaLosses = losses - baseLosses;
-        const total = deltaWins + deltaLosses;
-        return { t: snapshot.t, v: total > 0 ? deltaWins / total : null };
-      }
-      return { t: snapshot.t, v: null };
+  const byMatch = new Map<number, MatchPlayerWithMeta>();
+  matchPlayers.forEach((row) => {
+    byMatch.set(row.matchId, row);
+  });
+
+  const totals = {
+    wins: 0,
+    losses: 0,
+    goals: 0,
+    assists: 0,
+    saves: 0,
+    shots: 0,
+    score: 0
+  };
+
+  const points = matches.map((match, index) => {
+    const row = byMatch.get(match.id);
+    if (row) {
+      totals.goals += numberOrZero(row.goals);
+      totals.assists += numberOrZero(row.assists);
+      totals.saves += numberOrZero(row.saves);
+      totals.shots += numberOrZero(row.shots);
+      totals.score += numberOrZero(row.score);
+      if (row.isWinner === 1) totals.wins += 1;
+      if (row.isWinner === 0) totals.losses += 1;
     }
 
-    if (metric === "goalShotRatio") {
-      const goals = derived.goals;
-      const shots = derived.shots;
-      const baseGoals = baselineDerived?.goals ?? null;
-      const baseShots = baselineDerived?.shots ?? null;
-      if (typeof goals === "number" && typeof shots === "number" && typeof baseGoals === "number" && typeof baseShots === "number") {
-        const deltaGoals = goals - baseGoals;
-        const deltaShots = shots - baseShots;
-        return { t: snapshot.t, v: deltaShots > 0 ? deltaGoals / deltaShots : null };
-      }
-      return { t: snapshot.t, v: null };
+    let value: number | null = null;
+    switch (metric) {
+      case "wins":
+        value = totals.wins;
+        break;
+      case "losses":
+        value = totals.losses;
+        break;
+      case "goals":
+        value = totals.goals;
+        break;
+      case "assists":
+        value = totals.assists;
+        break;
+      case "saves":
+        value = totals.saves;
+        break;
+      case "shots":
+        value = totals.shots;
+        break;
+      case "score":
+        value = totals.score;
+        break;
+      case "winRate":
+        value = totals.wins + totals.losses > 0 ? totals.wins / (totals.wins + totals.losses) : null;
+        break;
+      case "goalShotRatio":
+        value = totals.shots > 0 ? totals.goals / totals.shots : null;
+        break;
+      default:
+        value = null;
     }
 
-    const value = (derived as unknown as Record<string, number | null>)[metric] ?? null;
-    const baselineValue = (baselineDerived as unknown as Record<string, number | null> | null)?.[metric] ?? null;
-
-    if (metric === "rankPoints") {
-      return { t: snapshot.t, v: typeof value === "number" ? value : null };
-    }
-
-    if (additiveMetrics.has(metric) && typeof value === "number" && typeof baselineValue === "number") {
-      return { t: snapshot.t, v: value - baselineValue };
-    }
-
-    if (typeof value === "number" && typeof baselineValue === "number") {
-      return { t: snapshot.t, v: value - baselineValue };
-    }
-
-    return { t: snapshot.t, v: null };
+    return { t: index + 1, v: value };
   });
 
   res.json(points);
@@ -1271,75 +1255,64 @@ router.get("/sessions/:id/game-stats", (req, res) => {
   const players = getPlayersBySession(sessionId);
   if (players.length === 0) return res.json([]);
 
-  const snapshots = db
-    .prepare(
-      "SELECT playerId, matchIndex, capturedAt, derivedJson FROM snapshots WHERE sessionId = ? AND matchIndex IS NOT NULL ORDER BY capturedAt ASC"
-    )
-    .all(sessionId) as { playerId: number; matchIndex: number | null; capturedAt: string; derivedJson: string }[];
-
-  const perPlayer = new Map<number, Map<number, DerivedMetrics | null>>();
-  const matchIndexes = new Set<number>();
-
-  snapshots.forEach((snapshot) => {
-    if (snapshot.matchIndex === null || snapshot.matchIndex === undefined) return;
-    const derived = parseJson<DerivedMetrics>(snapshot.derivedJson);
-    if (!perPlayer.has(snapshot.playerId)) {
-      perPlayer.set(snapshot.playerId, new Map());
-    }
-    perPlayer.get(snapshot.playerId)!.set(snapshot.matchIndex, derived);
-    if (snapshot.matchIndex > 0) {
-      matchIndexes.add(snapshot.matchIndex);
-    }
+  const normalizedRoster = new Map<string, number>();
+  players.forEach((player) => {
+    normalizedRoster.set(normalizeGamertag(player.gamertag), player.id);
   });
 
-  const sortedMatchIndexes = Array.from(matchIndexes).sort((a, b) => a - b);
+  const matches = listMatchesForSession(sessionId);
+  const matchPlayers = listMatchPlayersForSession(sessionId);
+  const matchPlayersByMatch = new Map<number, MatchPlayerWithMeta[]>();
+  matchPlayers.forEach((row) => {
+    if (!matchPlayersByMatch.has(row.matchId)) {
+      matchPlayersByMatch.set(row.matchId, []);
+    }
+    matchPlayersByMatch.get(row.matchId)!.push(row);
+  });
 
-  const rows = sortedMatchIndexes.map((matchIndex) => {
-    let goalsTotal: number | null = null;
-    let shotsTotal: number | null = null;
-    let assistsTotal: number | null = null;
-    let savesTotal: number | null = null;
-    let result: "Win" | "Loss" | "Unknown" = "Unknown";
-
-    players.forEach((player) => {
-      const map = perPlayer.get(player.id);
-      if (!map) return;
-      const current = map.get(matchIndex);
-      const previous = map.get(matchIndex - 1);
-      const goalsDelta = metricDelta(current, previous, "goals");
-      const shotsDelta = metricDelta(current, previous, "shots");
-      const assistsDelta = metricDelta(current, previous, "assists");
-      const savesDelta = metricDelta(current, previous, "saves");
-      const winsDelta = metricDelta(current, previous, "wins");
-      const lossesDelta = metricDelta(current, previous, "losses");
-
-      if (typeof goalsDelta === "number") {
-        goalsTotal = (goalsTotal ?? 0) + goalsDelta;
+  const rows = matches.map((match, index) => {
+    const rowsForMatch = matchPlayersByMatch.get(match.id) ?? [];
+    const sessionRows = rowsForMatch.filter((row) => {
+      if (typeof row.playerId === "number") {
+        return players.some((player) => player.id === row.playerId);
       }
-      if (typeof shotsDelta === "number") {
-        shotsTotal = (shotsTotal ?? 0) + shotsDelta;
-      }
-      if (typeof assistsDelta === "number") {
-        assistsTotal = (assistsTotal ?? 0) + assistsDelta;
-      }
-      if (typeof savesDelta === "number") {
-        savesTotal = (savesTotal ?? 0) + savesDelta;
-      }
-
-      if (winsDelta === 1) {
-        result = "Win";
-      } else if (lossesDelta === 1 && result !== "Win") {
-        result = "Loss";
-      }
+      const mappedId = normalizedRoster.get(normalizeGamertag(row.gamertag));
+      return typeof mappedId === "number";
     });
 
+    if (sessionRows.length === 0) {
+      return {
+        game: index + 1,
+        result: "Unknown" as const,
+        goals: null,
+        shots: null,
+        assists: null,
+        saves: null,
+        score: null
+      };
+    }
+
+    const goals = sessionRows.reduce((sum, row) => sum + numberOrZero(row.goals), 0);
+    const shots = sessionRows.reduce((sum, row) => sum + numberOrZero(row.shots), 0);
+    const assists = sessionRows.reduce((sum, row) => sum + numberOrZero(row.assists), 0);
+    const saves = sessionRows.reduce((sum, row) => sum + numberOrZero(row.saves), 0);
+    const score = sessionRows.reduce((sum, row) => sum + numberOrZero(row.score), 0);
+
+    let result: "Win" | "Loss" | "Unknown" = "Unknown";
+    if (sessionRows.some((row) => row.isWinner === 1)) {
+      result = "Win";
+    } else if (sessionRows.some((row) => row.isWinner === 0)) {
+      result = "Loss";
+    }
+
     return {
-      game: matchIndex,
+      game: index + 1,
       result,
-      goals: goalsTotal,
-      shots: shotsTotal,
-      assists: assistsTotal,
-      saves: savesTotal
+      goals,
+      shots,
+      assists,
+      saves,
+      score
     };
   });
 
@@ -1468,9 +1441,12 @@ router.post("/sessions/:id/snapshots/manual", (req, res) => {
   const playerById = new Map(players.map((player) => [player.id, player]));
   const playerByGamertag = new Map(players.map((player) => [player.gamertag.toLowerCase(), player]));
   const capturedAt = new Date().toISOString();
+  const baselineOnly = Boolean(req.body?.baselineOnly);
   const requestedMatchIndex = Number(req.body?.matchIndex);
   const matchIndex =
-    Number.isFinite(requestedMatchIndex) && requestedMatchIndex > 0
+    baselineOnly
+      ? null
+      : Number.isFinite(requestedMatchIndex) && requestedMatchIndex > 0
       ? requestedMatchIndex
       : session.matchIndex + 1;
 
@@ -1508,7 +1484,7 @@ router.post("/sessions/:id/snapshots/manual", (req, res) => {
     inserted += 1;
   }
 
-  if (matchIndex > session.matchIndex) {
+  if (typeof matchIndex === "number" && matchIndex > session.matchIndex) {
     setSessionMatchIndex(sessionId, matchIndex);
   }
   recordDbMetric(sessionId);
@@ -1771,11 +1747,6 @@ router.get("/sessions/:id/raw", (req, res) => {
   });
 });
 
-router.get("/logs/polling", requireAdmin, (req, res) => {
-  const limit = Number(req.query.limit || 200);
-  res.json(listPollingLogs(Number.isFinite(limit) ? limit : 200));
-});
-
 router.get("/logs/coach", requireAdmin, (req, res) => {
   const limit = Number(req.query.limit || 200);
   res.json(listCoachAudit(Number.isFinite(limit) ? limit : 200));
@@ -2002,8 +1973,6 @@ router.post("/demo", async (req, res) => {
     { platform: "xbl", gamertag: "DemoPlayerOne" },
     { platform: "xbl", gamertag: "DemoPlayerTwo" }
   ]);
-  await initializeSession(session.id);
-  startPolling(session.id, 60);
   const detail = toSessionDetail(session.id);
   res.status(201).json(detail);
 });

@@ -250,18 +250,21 @@ db.exec(`
   );
 `);
 
+try {
+  db.exec("DROP TABLE IF EXISTS polling_logs");
+} catch {}
+
 db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_scoreboard_devices_key ON scoreboard_devices(deviceKeyHash);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_scoreboard_ingests_dedupe ON scoreboard_ingests(dedupeKey);
   CREATE INDEX IF NOT EXISTS idx_scoreboard_ingests_device ON scoreboard_ingests(deviceId);
   CREATE INDEX IF NOT EXISTS idx_scoreboard_ingests_session ON scoreboard_ingests(sessionId);
   CREATE INDEX IF NOT EXISTS idx_scoreboard_ingest_images_ingest ON scoreboard_ingest_images(ingestId);
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_dedupe ON matches(dedupeKey);
-  CREATE INDEX IF NOT EXISTS idx_matches_session ON matches(sessionId);
-  CREATE INDEX IF NOT EXISTS idx_matches_signature ON matches(signatureKey);
-  CREATE INDEX IF NOT EXISTS idx_match_players_match ON match_players(matchId);
-  CREATE INDEX IF NOT EXISTS idx_scoreboard_audit_created ON scoreboard_audit(createdAt);
-`);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_dedupe ON matches(dedupeKey);
+    CREATE INDEX IF NOT EXISTS idx_matches_session ON matches(sessionId);
+    CREATE INDEX IF NOT EXISTS idx_match_players_match ON match_players(matchId);
+    CREATE INDEX IF NOT EXISTS idx_scoreboard_audit_created ON scoreboard_audit(createdAt);
+  `);
 
 try {
   db.exec("ALTER TABLE sessions ADD COLUMN matchIndex INTEGER NOT NULL DEFAULT 0");
@@ -306,9 +309,12 @@ try {
 try {
   db.exec("ALTER TABLE snapshots ADD COLUMN matchIndex INTEGER");
 } catch {}
-try {
-  db.exec("ALTER TABLE matches ADD COLUMN signatureKey TEXT");
-} catch {}
+  try {
+    db.exec("ALTER TABLE matches ADD COLUMN signatureKey TEXT");
+  } catch {}
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_matches_signature ON matches(signatureKey)");
+  } catch {}
 
 try {
   db.exec("ALTER TABLE db_metrics ADD COLUMN sessionId INTEGER");
@@ -641,6 +647,10 @@ export function insertSnapshot(
 }
 
 export function getBaselineSnapshot(playerId: number): SnapshotRow | undefined {
+  const baseline = db
+    .prepare("SELECT * FROM snapshots WHERE playerId = ? AND matchIndex IS NULL ORDER BY capturedAt ASC LIMIT 1")
+    .get(playerId) as SnapshotRow | undefined;
+  if (baseline) return baseline;
   return db
     .prepare("SELECT * FROM snapshots WHERE playerId = ? ORDER BY capturedAt ASC LIMIT 1")
     .get(playerId) as SnapshotRow | undefined;
@@ -1033,7 +1043,14 @@ export function getScoreboardIngest(ingestId: number): ScoreboardIngestRow | und
 
 export function listScoreboardIngests(limit = 50): ScoreboardIngestRow[] {
   return db
-    .prepare("SELECT * FROM scoreboard_ingests ORDER BY receivedAt DESC LIMIT ?")
+    .prepare(
+      `SELECT scoreboard_ingests.*,
+              matches.signatureKey AS signatureKey
+         FROM scoreboard_ingests
+         LEFT JOIN matches ON matches.id = scoreboard_ingests.matchId
+        ORDER BY scoreboard_ingests.receivedAt DESC
+        LIMIT ?`
+    )
     .all(limit) as ScoreboardIngestRow[];
 }
 

@@ -89,6 +89,7 @@ export interface ScoreboardIngestRow {
   focusPlaylistId: number | null;
   dedupeKey: string | null;
   matchId: number | null;
+  signatureKey?: string | null;
 }
 
 export interface MatchRow {
@@ -171,6 +172,7 @@ export interface DerivedMetrics {
   assists: number | null;
   saves: number | null;
   shots: number | null;
+  score: number | null;
   winRate: number | null;
   goalShotRatio: number | null;
   mmr: number | null;

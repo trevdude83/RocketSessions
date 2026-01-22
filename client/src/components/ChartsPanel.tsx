@@ -23,9 +23,9 @@ const metricOptions = [
   { value: "assists", label: "Assists" },
   { value: "saves", label: "Saves" },
   { value: "shots", label: "Shots" },
+  { value: "score", label: "Score" },
   { value: "winRate", label: "Win Rate" },
-  { value: "goalShotRatio", label: "Goal/Shot Ratio" },
-  { value: "mmr", label: "MMR" }
+  { value: "goalShotRatio", label: "Goal/Shot Ratio" }
 ];
 
 const palette = ["#3772ff", "#f56b2a", "#10b981", "#f59e0b"];
@@ -36,7 +36,7 @@ const additiveMetrics = new Set([
   "assists",
   "saves",
   "shots",
-  "mmr"
+  "score"
 ]);
 
 function mergeSeries(series: { key: string; points: TimeseriesPoint[] }[]) {

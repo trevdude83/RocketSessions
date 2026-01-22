@@ -19,14 +19,12 @@ export default function SessionForm({ onCreated }: Props) {
   const { user } = useAuth();
   const [name, setName] = useState("");
   const [mode, setMode] = useState("2v2");
-  const [interval, setInterval] = useState("180");
   const [players, setPlayers] = useState<string[]>(["", ""]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [saveTeam, setSaveTeam] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [includeCoachOnEnd, setIncludeCoachOnEnd] = useState(false);
-  const [manualMode, setManualMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -94,20 +92,14 @@ export default function SessionForm({ onCreated }: Props) {
       const detail = await createSession({
         name,
         mode,
-        pollingIntervalSeconds: interval ? Number(interval) : undefined,
         players: selectedTeam ? undefined : activePlayers.map((gamertag) => ({ platform: "xbl", gamertag })),
         teamId: selectedTeam ? Number(selectedTeamId) : undefined,
         teamName: !selectedTeam && saveTeam ? teamName : undefined,
         saveTeam: !selectedTeam && saveTeam ? true : undefined,
-        includeCoachOnEnd,
-        manualMode: isAdmin ? manualMode : undefined
+        includeCoachOnEnd
       });
       onCreated(detail);
-      if (isAdmin && manualMode) {
-        navigate(`/sessions/${detail.session.id}/advanced`);
-      } else {
-        navigate(`/sessions/${detail.session.id}`);
-      }
+      navigate(`/sessions/${detail.session.id}`);
     } catch (err: any) {
       setError(err.message || "Failed to create session");
     } finally {
@@ -202,15 +194,6 @@ export default function SessionForm({ onCreated }: Props) {
         {isAdmin && (
           <details className="advanced">
             <summary>Advanced settings (admin only)</summary>
-            <label>
-              Polling interval (seconds)
-              <input
-                value={interval}
-                onChange={(e) => setInterval(e.target.value)}
-                placeholder="60"
-                type="number"
-              />
-            </label>
             <label className="checkbox">
               <input
                 type="checkbox"
@@ -220,15 +203,6 @@ export default function SessionForm({ onCreated }: Props) {
               Generate AI Coach report when the session ends
             </label>
             <p className="note">The coach report runs once when you click End session.</p>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={manualMode}
-                onChange={(e) => setManualMode(e.target.checked)}
-              />
-              Enable manual mode (no polling)
-            </label>
-            <p className="note">Use manual snapshots to establish the baseline and track games.</p>
           </details>
         )}
         {activePlayers.map((value, index) => (
