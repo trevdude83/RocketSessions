@@ -272,7 +272,8 @@ router.get("/ingest/:ingestId/detail", deviceAuth, (req, res) => {
           source: match.source,
           createdAt: match.createdAt,
           extractionConfidence: match.extractionConfidence,
-          dedupeKey: match.dedupeKey
+          dedupeKey: match.dedupeKey,
+          signatureKey: match.signatureKey
         }
       : null,
     players,
