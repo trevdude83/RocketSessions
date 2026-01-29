@@ -399,7 +399,14 @@ async function preprocessBuffer(buffer: Buffer): Promise<{ buffer: Buffer; mime:
     if (targetWidth && width && targetWidth > width) {
       pipeline = pipeline.resize({ width: targetWidth, kernel: sharp.kernel.lanczos3 });
     }
-    const output = await pipeline.sharpen().png({ compressionLevel: 3 }).toBuffer();
+    const denoiseSetting = (process.env.SCOREBOARD_DENOISE ?? "1").toLowerCase();
+    if (denoiseSetting !== "0" && denoiseSetting !== "false" && denoiseSetting !== "off") {
+      pipeline = pipeline.median(1);
+      pipeline = pipeline.sharpen({ sigma: 1.2, m1: 0.6, m2: 2.5 });
+    } else {
+      pipeline = pipeline.sharpen();
+    }
+    const output = await pipeline.png({ compressionLevel: 3 }).toBuffer();
     return { buffer: output, mime: "image/png" };
   } catch {
     return { buffer, mime: "image/jpeg" };
