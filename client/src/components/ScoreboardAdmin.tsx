@@ -168,7 +168,7 @@ export default function ScoreboardAdmin() {
               {loading ? "Refreshing..." : "Refresh"}
             </button>
           </div>
-          <p className="panel-help">Retention is informational for now (cleanup is manual).</p>
+          <p className="panel-help">Retention controls automated cleanup (runs every 6 hours).</p>
           <div className="panel-block">
             <div className="form">
               <label>
@@ -226,8 +226,9 @@ export default function ScoreboardAdmin() {
           </div>
           {devices.length === 0 && <p>No devices registered yet.</p>}
           {devices.length > 0 && (
-            <div className="team-history-table extra scoreboard-ingests">
+            <div className="team-history-table extra scoreboard-devices">
               <div className="team-history-row header">
+                <span>ID</span>
                 <span>Device</span>
                 <span>Last seen</span>
                 <span>Enabled</span>
@@ -236,6 +237,7 @@ export default function ScoreboardAdmin() {
               </div>
               {devices.map((device) => (
                 <div className="team-history-row" key={device.id}>
+                  <span>#{device.id}</span>
                   <span>{device.name || `Device #${device.id}`}</span>
                   <span>{formatDateTime(device.lastSeenAt)}</span>
                   <span>{device.isEnabled ? "Yes" : "No"}</span>

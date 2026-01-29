@@ -369,6 +369,9 @@ async function processIngest(
     if (images.length === 0) throw new Error("No images stored for ingest.");
 
     const extractionResult = await extractScoreboard(images);
+    if (!extractionResult.model && extractionResult.rawText.includes("OPENAI_API_KEY missing")) {
+      throw new Error("OpenAI is not configured for scoreboard extraction.");
+    }
     const extraction = extractionResult.extraction;
 
     const session = ingest.sessionId ? getSession(ingest.sessionId) : null;

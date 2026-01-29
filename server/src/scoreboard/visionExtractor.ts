@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import fs from "fs/promises";
 import sharp from "sharp";
 import { z } from "zod";
-import { ScoreboardExtraction } from "./types.js";
+import { ScoreboardExtraction, ScoreboardTeam } from "./types.js";
 
 const playerSchema = z.object({
   name: z.string().nullable(),
@@ -74,18 +74,20 @@ export async function extractScoreboard(
   options: { model?: string | null } = {}
 ): Promise<ScoreboardExtractionResult> {
   if (!process.env.OPENAI_API_KEY) {
+    const emptyExtraction: ScoreboardExtraction = {
+      match: { playlistName: null, isRanked: null, winningTeam: null },
+      teams: { blue: [], orange: [] }
+    };
     return {
-      extraction: {
-        match: { playlistName: null, isRanked: null, winningTeam: null },
-        teams: { blue: [], orange: [] }
-      },
+      extraction: emptyExtraction,
       confidence: null,
       rawText: "OPENAI_API_KEY missing",
       model: null,
       tokensUsed: null,
       inputTokens: null,
       outputTokens: null,
-      cachedInputTokens: null
+      cachedInputTokens: null,
+      dedupeSignature: buildDedupeSignature(emptyExtraction)
     };
   }
 
@@ -160,7 +162,7 @@ export async function extractScoreboard(
               role: "user",
               content: [
                 { type: "input_text", text: USER_PROMPT },
-                buildImage("high", buffer)
+                buildImage("high", imageItem)
               ]
             }
           ],
