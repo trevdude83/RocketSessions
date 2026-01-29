@@ -1107,15 +1107,8 @@ router.get("/sessions/:id/summary", async (req, res) => {
 
     deltas[player.id] = {};
     metrics.forEach((metric) => {
-      const baseValue = baselineDerived?.[metric] ?? null;
       const latestValue = latestDerived?.[metric] ?? null;
-      if (typeof baseValue === "number" && typeof latestValue === "number") {
-        deltas[player.id][metric] = latestValue - baseValue;
-      } else if (typeof latestValue === "number" && baseValue === null) {
-        deltas[player.id][metric] = latestValue;
-      } else {
-        deltas[player.id][metric] = null;
-      }
+      deltas[player.id][metric] = typeof latestValue === "number" ? latestValue : null;
     });
 
     sessionStats[player.id] = {
