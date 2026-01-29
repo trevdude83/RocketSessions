@@ -274,12 +274,19 @@ async function applyFocusedPasses(
   extraction: ScoreboardExtraction,
   addUsage: (usage?: OpenAI.Responses.ResponseUsage) => void
 ): Promise<ScoreboardExtraction> {
-  const multiPassEnabled = (process.env.SCOREBOARD_MULTI_PASS ?? "1") !== "0";
-  if (!multiPassEnabled) return extraction;
+  const multiPassSetting = (process.env.SCOREBOARD_MULTI_PASS ?? "auto").toLowerCase();
+  if (multiPassSetting === "0" || multiPassSetting === "false" || multiPassSetting === "off") {
+    return extraction;
+  }
 
   const blueNames = extraction.teams.blue.map((player) => player.name ?? "");
   const orangeNames = extraction.teams.orange.map((player) => player.name ?? "");
-  const stats = ["score", "goals", "assists", "saves", "shots"] as const;
+  const allStats = ["score", "goals", "assists", "saves", "shots"] as const;
+  const stats =
+    multiPassSetting === "1" || multiPassSetting === "true" || multiPassSetting === "on"
+      ? allStats
+      : pickFocusedStats(extraction);
+  if (stats.length === 0) return extraction;
   let updated = { ...extraction, teams: { ...extraction.teams } };
 
   for (const stat of stats) {
@@ -312,6 +319,30 @@ async function applyFocusedPasses(
   }
 
   return updated;
+}
+
+function pickFocusedStats(extraction: ScoreboardExtraction): Array<"score" | "goals" | "assists" | "saves" | "shots"> {
+  const players = [...extraction.teams.blue, ...extraction.teams.orange].filter((player) => player.name);
+  if (players.length === 0) return [];
+
+  const needsSavesCheck = players.some((player) => {
+    if (player.saves !== 0) return false;
+    const score = typeof player.score === "number" ? player.score : 0;
+    const goals = typeof player.goals === "number" ? player.goals : 0;
+    const assists = typeof player.assists === "number" ? player.assists : 0;
+    const shots = typeof player.shots === "number" ? player.shots : 0;
+    return score >= 400 || goals >= 2 || assists >= 1 || shots >= 3;
+  });
+
+  const hasNulls = players.some((player) =>
+    [player.score, player.goals, player.assists, player.saves, player.shots].some((value) => value === null)
+  );
+
+  if (hasNulls) {
+    return ["score", "goals", "assists", "saves", "shots"];
+  }
+
+  return needsSavesCheck ? ["saves"] : [];
 }
 
 async function extractColumn(
