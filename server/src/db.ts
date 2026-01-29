@@ -2,7 +2,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { MatchRow, MatchPlayerRow, PlayerInput, PlayerRow, ScoreboardDeviceRow, ScoreboardIngestRow, ScoreboardAuditRow, SessionRow, SnapshotRow, TeamRow, SessionTeamStatsRow } from "./types.js";
+import { MatchRow, MatchPlayerRow, PlayerInput, PlayerRow, ScoreboardDeviceRow, ScoreboardIngestRow, ScoreboardAuditRow, ScoreboardUnmatchedRow, SessionRow, SnapshotRow, TeamRow, SessionTeamStatsRow } from "./types.js";
 
 const baseDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const serverDataDir = path.join(baseDir, "data");
@@ -204,6 +204,22 @@ db.exec(`
     createdAt TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS scoreboard_unmatched (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingestId INTEGER NOT NULL UNIQUE,
+    createdAt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    mode TEXT,
+    teamSize INTEGER,
+    blueNamesJson TEXT NOT NULL,
+    orangeNamesJson TEXT NOT NULL,
+    candidatesJson TEXT,
+    rawExtractionJson TEXT NOT NULL,
+    derivedMatchJson TEXT NOT NULL,
+    signatureKey TEXT,
+    assignedSessionId INTEGER
+  );
+
   CREATE TABLE IF NOT EXISTS matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sessionId INTEGER,
@@ -260,6 +276,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scoreboard_ingests_device ON scoreboard_ingests(deviceId);
   CREATE INDEX IF NOT EXISTS idx_scoreboard_ingests_session ON scoreboard_ingests(sessionId);
   CREATE INDEX IF NOT EXISTS idx_scoreboard_ingest_images_ingest ON scoreboard_ingest_images(ingestId);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_scoreboard_unmatched_ingest ON scoreboard_unmatched(ingestId);
+  CREATE INDEX IF NOT EXISTS idx_scoreboard_unmatched_created ON scoreboard_unmatched(createdAt);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_dedupe ON matches(dedupeKey);
     CREATE INDEX IF NOT EXISTS idx_matches_session ON matches(sessionId);
     CREATE INDEX IF NOT EXISTS idx_match_players_match ON match_players(matchId);
@@ -1077,6 +1095,79 @@ export function listScoreboardIngestImages(ingestId: number): { id: number; imag
   return db
     .prepare("SELECT id, imagePath, createdAt FROM scoreboard_ingest_images WHERE ingestId = ? ORDER BY id ASC")
     .all(ingestId) as { id: number; imagePath: string; createdAt: string }[];
+}
+
+export function createScoreboardUnmatched(entry: {
+  ingestId: number;
+  mode: string | null;
+  teamSize: number | null;
+  blueNames: string[];
+  orangeNames: string[];
+  candidates: unknown;
+  rawExtractionJson: string;
+  derivedMatchJson: string;
+  signatureKey: string | null;
+}): ScoreboardUnmatchedRow {
+  const createdAt = new Date().toISOString();
+  const result = db.prepare(
+    `INSERT INTO scoreboard_unmatched
+      (ingestId, createdAt, status, mode, teamSize, blueNamesJson, orangeNamesJson, candidatesJson, rawExtractionJson, derivedMatchJson, signatureKey, assignedSessionId)
+     VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+  ).run(
+    entry.ingestId,
+    createdAt,
+    entry.mode,
+    entry.teamSize,
+    JSON.stringify(entry.blueNames),
+    JSON.stringify(entry.orangeNames),
+    entry.candidates ? JSON.stringify(entry.candidates) : null,
+    entry.rawExtractionJson,
+    entry.derivedMatchJson,
+    entry.signatureKey
+  );
+  return {
+    id: Number(result.lastInsertRowid),
+    ingestId: entry.ingestId,
+    createdAt,
+    status: "pending",
+    mode: entry.mode,
+    teamSize: entry.teamSize,
+    blueNamesJson: JSON.stringify(entry.blueNames),
+    orangeNamesJson: JSON.stringify(entry.orangeNames),
+    candidatesJson: entry.candidates ? JSON.stringify(entry.candidates) : null,
+    rawExtractionJson: entry.rawExtractionJson,
+    derivedMatchJson: entry.derivedMatchJson,
+    signatureKey: entry.signatureKey,
+    assignedSessionId: null
+  };
+}
+
+export function getScoreboardUnmatchedByIngestId(ingestId: number): ScoreboardUnmatchedRow | undefined {
+  return db.prepare("SELECT * FROM scoreboard_unmatched WHERE ingestId = ?").get(ingestId) as ScoreboardUnmatchedRow | undefined;
+}
+
+export function listScoreboardUnmatched(limit = 50): ScoreboardUnmatchedRow[] {
+  return db
+    .prepare("SELECT * FROM scoreboard_unmatched WHERE status = 'pending' ORDER BY createdAt DESC LIMIT ?")
+    .all(limit) as ScoreboardUnmatchedRow[];
+}
+
+export function updateScoreboardUnmatched(unmatchedId: number, update: { status?: "pending" | "assigned" | "ignored"; assignedSessionId?: number | null; candidates?: unknown | null }): void {
+  const current = db.prepare("SELECT * FROM scoreboard_unmatched WHERE id = ?").get(unmatchedId) as ScoreboardUnmatchedRow | undefined;
+  if (!current) return;
+  const status = update.status ?? current.status;
+  const assignedSessionId = update.assignedSessionId ?? current.assignedSessionId;
+  const candidatesJson = update.candidates === undefined ? current.candidatesJson : update.candidates ? JSON.stringify(update.candidates) : null;
+  db.prepare("UPDATE scoreboard_unmatched SET status = ?, assignedSessionId = ?, candidatesJson = ? WHERE id = ?")
+    .run(status, assignedSessionId ?? null, candidatesJson, unmatchedId);
+}
+
+export function getScoreboardUnmatched(unmatchedId: number): ScoreboardUnmatchedRow | undefined {
+  return db.prepare("SELECT * FROM scoreboard_unmatched WHERE id = ?").get(unmatchedId) as ScoreboardUnmatchedRow | undefined;
+}
+
+export function deleteScoreboardUnmatched(unmatchedId: number): void {
+  db.prepare("DELETE FROM scoreboard_unmatched WHERE id = ?").run(unmatchedId);
 }
 
 export function findMatchByDedupe(dedupeKey: string): MatchRow | undefined {

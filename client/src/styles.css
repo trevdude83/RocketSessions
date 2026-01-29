@@ -1731,6 +1731,16 @@ textarea {
   word-break: break-all;
 }
 
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-actions select {
+  min-width: 160px;
+}
+
 .coach-audit-table {
   display: grid;
   gap: 8px;

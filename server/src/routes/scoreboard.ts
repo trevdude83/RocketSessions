@@ -8,11 +8,14 @@ import {
   db,
   createScoreboardDevice,
   createScoreboardIngest,
+  createScoreboardUnmatched,
   findMatchByDedupe,
   findMatchBySignature,
   getScoreboardDeviceByHash,
   getScoreboardDevice,
   getScoreboardIngest,
+  getScoreboardUnmatched,
+  getScoreboardUnmatchedByIngestId,
   getScoreboardIngestByDedupe,
   getLatestScoreboardIngestForDevice,
   getMatch,
@@ -24,12 +27,14 @@ import {
   insertMatchPlayer,
   insertScoreboardIngestImage,
   insertScoreboardAudit,
+  listScoreboardUnmatched,
   listMatchPlayers,
   listScoreboardDevices,
   listScoreboardAudit,
   listScoreboardIngestImages,
   listScoreboardIngests,
   setSetting,
+  updateScoreboardUnmatched,
   updateScoreboardDeviceSeen,
   setScoreboardDeviceEnabled,
   updateScoreboardIngest
@@ -40,6 +45,7 @@ import { mapPlayers } from "../scoreboard/playerMapper.js";
 import { deriveMatch } from "../scoreboard/matchDeriver.js";
 import { applyMatchToSession } from "../scoreboard/matchApplier.js";
 import { hashBuffer } from "../scoreboard/dedupe.js";
+import { ScoreboardExtraction } from "../scoreboard/types.js";
 import { computeOpenAiCostUsd } from "../openaiCost.js";
 
 const router = Router();
@@ -319,6 +325,163 @@ router.get("/admin/ingests", requireAuth, requireAdmin, (req, res) => {
   res.json(listScoreboardIngests(Number.isFinite(limit) ? limit : 50));
 });
 
+router.get("/admin/unmatched", requireAuth, requireAdmin, (req, res) => {
+  const limit = Number(req.query.limit ?? 50);
+  const rows = listScoreboardUnmatched(Number.isFinite(limit) ? limit : 50);
+  res.json(
+    rows.map((row) => ({
+      id: row.id,
+      ingestId: row.ingestId,
+      createdAt: row.createdAt,
+      status: row.status,
+      mode: row.mode,
+      teamSize: row.teamSize,
+      blueNames: safeJsonParseArray(row.blueNamesJson),
+      orangeNames: safeJsonParseArray(row.orangeNamesJson),
+      candidates: safeJsonParse(row.candidatesJson || "")
+    }))
+  );
+});
+
+router.post("/admin/unmatched/:unmatchedId/assign", requireAuth, requireAdmin, (req, res) => {
+  const unmatchedId = Number(req.params.unmatchedId);
+  const sessionId = Number(req.body?.sessionId);
+  if (!unmatchedId || !sessionId) {
+    return res.status(400).json({ error: "Missing unmatchedId or sessionId" });
+  }
+
+  const unmatched = getScoreboardUnmatched(unmatchedId);
+  if (!unmatched) return res.status(404).json({ error: "Unmatched ingest not found" });
+
+  const ingest = getScoreboardIngest(unmatched.ingestId);
+  if (!ingest) return res.status(404).json({ error: "Ingest not found" });
+
+  const session = getSession(sessionId);
+  if (!session || session.isEnded) {
+    return res.status(400).json({ error: "Session not available for assignment" });
+  }
+
+  const extraction = safeJsonParse<ScoreboardExtraction>(unmatched.rawExtractionJson);
+  const derivedMatch = safeJsonParse(unmatched.derivedMatchJson) ?? (extraction ? deriveMatch(extraction) : null);
+  if (!extraction || !derivedMatch) {
+    return res.status(500).json({ error: "Stored extraction is invalid" });
+  }
+
+  const existingMatch = unmatched.signatureKey ? findMatchBySignature(unmatched.signatureKey, sessionId) : null;
+  if (existingMatch) {
+    updateScoreboardIngest(ingest.id, {
+      status: "extracted",
+      errorMessage: "Duplicate scoreboard stats.",
+      matchId: existingMatch.id,
+      sessionId: session.id,
+      teamId: session.teamId ?? null,
+      focusPlaylistId: getFocusPlaylistId(session.mode)
+    });
+    updateScoreboardUnmatched(unmatched.id, { status: "assigned", assignedSessionId: session.id });
+    return res.json({ ok: true, matchId: existingMatch.id, deduped: true });
+  }
+
+  const sessionPlayers = getPlayersBySession(session.id);
+  const playerIdentities = sessionPlayers.map((player) => ({
+    playerId: player.id,
+    gamertag: player.gamertag,
+    platform: player.platform
+  }));
+
+  const mappedBlue = mapPlayers(extraction.teams.blue, playerIdentities);
+  const mappedOrange = mapPlayers(extraction.teams.orange, playerIdentities);
+
+  const match = insertMatch({
+    sessionId: session.id,
+    teamId: session.teamId ?? null,
+    source: "vision",
+    createdAt: new Date().toISOString(),
+    rawExtractionJson: JSON.stringify(extraction),
+    derivedMatchJson: JSON.stringify(derivedMatch),
+    extractionConfidence: null,
+    dedupeKey: ingest.dedupeKey,
+    signatureKey: unmatched.signatureKey
+  });
+
+  extraction.teams.blue.forEach((player, index) => {
+    const mapped = mappedBlue[index];
+    insertMatchPlayer({
+      matchId: match.id,
+      playerId: mapped?.playerId ?? null,
+      gamertag: mapped?.gamertag ?? player.name ?? "Unknown",
+      platform: mapped?.platform ?? "xbl",
+      goals: player.goals,
+      assists: player.assists,
+      saves: player.saves,
+      shots: player.shots,
+      score: player.score,
+      isWinner: extraction.match.winningTeam ? extraction.match.winningTeam === "blue" : null,
+      nameMatchConfidence: mapped?.confidence ?? null
+    });
+  });
+
+  extraction.teams.orange.forEach((player, index) => {
+    const mapped = mappedOrange[index];
+    insertMatchPlayer({
+      matchId: match.id,
+      playerId: mapped?.playerId ?? null,
+      gamertag: mapped?.gamertag ?? player.name ?? "Unknown",
+      platform: mapped?.platform ?? "xbl",
+      goals: player.goals,
+      assists: player.assists,
+      saves: player.saves,
+      shots: player.shots,
+      score: player.score,
+      isWinner: extraction.match.winningTeam ? extraction.match.winningTeam === "orange" : null,
+      nameMatchConfidence: mapped?.confidence ?? null
+    });
+  });
+
+  const matchIndex = Math.max(session.matchIndex + 1, 1);
+  applyMatchToSession({
+    sessionId: session.id,
+    matchIndex,
+    createdAt: match.createdAt,
+    winningTeam: extraction.match.winningTeam,
+    players: [
+      ...extraction.teams.blue.map((player, index) => ({
+        playerId: mappedBlue[index]?.playerId ?? null,
+        gamertag: mappedBlue[index]?.gamertag ?? player.name ?? "Unknown",
+        platform: mappedBlue[index]?.platform ?? "xbl",
+        goals: player.goals,
+        assists: player.assists,
+        saves: player.saves,
+        shots: player.shots,
+        score: player.score,
+        team: "blue" as const
+      })),
+      ...extraction.teams.orange.map((player, index) => ({
+        playerId: mappedOrange[index]?.playerId ?? null,
+        gamertag: mappedOrange[index]?.gamertag ?? player.name ?? "Unknown",
+        platform: mappedOrange[index]?.platform ?? "xbl",
+        goals: player.goals,
+        assists: player.assists,
+        saves: player.saves,
+        shots: player.shots,
+        score: player.score,
+        team: "orange" as const
+      }))
+    ]
+  });
+
+  updateScoreboardIngest(ingest.id, {
+    status: "extracted",
+    errorMessage: null,
+    matchId: match.id,
+    sessionId: session.id,
+    teamId: session.teamId ?? null,
+    focusPlaylistId: getFocusPlaylistId(session.mode)
+  });
+  updateScoreboardUnmatched(unmatched.id, { status: "assigned", assignedSessionId: session.id });
+
+  res.json({ ok: true, matchId: match.id, deduped: false });
+});
+
 router.get("/admin/audit", requireAuth, requireAdmin, (req, res) => {
   const limit = Number(req.query.limit ?? 200);
   res.json(listScoreboardAudit(Number.isFinite(limit) ? limit : 200));
@@ -336,12 +499,23 @@ function getActiveSession() {
     .get() as { id: number; teamId: number | null; mode: string; matchIndex: number } | undefined;
 }
 
-function safeJsonParse(value: string): unknown {
+function listActiveSessions() {
+  return db
+    .prepare("SELECT * FROM sessions WHERE isActive = 1 AND isEnded = 0 ORDER BY createdAt DESC")
+    .all() as { id: number; teamId: number | null; mode: string; createdAt: string }[];
+}
+
+function safeJsonParse<T>(value: string): T | null {
   try {
-    return JSON.parse(value);
+    return JSON.parse(value) as T;
   } catch {
     return null;
   }
+}
+
+function safeJsonParseArray(value: string): string[] {
+  const parsed = safeJsonParse<string[]>(value);
+  return Array.isArray(parsed) ? parsed.map((entry) => String(entry)) : [];
 }
 
 async function processIngest(
@@ -374,8 +548,62 @@ async function processIngest(
     }
     const extraction = extractionResult.extraction;
 
-    const session = ingest.sessionId ? getSession(ingest.sessionId) : null;
-    const team = ingest.teamId ? getTeam(ingest.teamId) : null;
+    const derivedMatch = deriveMatch(extraction);
+    const signatureKey = extractionResult.dedupeSignature;
+    const matchDecision = resolveSessionMatch(extraction);
+    if (matchDecision.status !== "matched") {
+      const existingUnmatched = getScoreboardUnmatchedByIngestId(ingestId);
+      if (!existingUnmatched) {
+        createScoreboardUnmatched({
+          ingestId,
+          mode: matchDecision.mode,
+          teamSize: matchDecision.teamSize,
+          blueNames: matchDecision.blueNames,
+          orangeNames: matchDecision.orangeNames,
+          candidates: matchDecision.candidates,
+          rawExtractionJson: JSON.stringify(extraction),
+          derivedMatchJson: JSON.stringify(derivedMatch),
+          signatureKey
+        });
+      } else {
+        updateScoreboardUnmatched(existingUnmatched.id, { candidates: matchDecision.candidates });
+      }
+
+      updateScoreboardIngest(ingestId, {
+        status: "pending_match",
+        errorMessage: matchDecision.reason || "No high-confidence session match.",
+        sessionId: null,
+        teamId: null,
+        focusPlaylistId: matchDecision.focusPlaylistId ?? null,
+        dedupeKey: ingest.dedupeKey,
+        matchId: null
+      });
+
+      insertScoreboardAudit({
+        deviceId: ingest.deviceId,
+        ingestId: ingest.id,
+        sessionId: null,
+        teamId: null,
+        model: extractionResult.model,
+        inputTokens: extractionResult.inputTokens,
+        cachedInputTokens: extractionResult.cachedInputTokens,
+        outputTokens: extractionResult.outputTokens,
+        tokensUsed: extractionResult.tokensUsed,
+        costUsd: computeOpenAiCostUsd(
+          extractionResult.model,
+          extractionResult.inputTokens,
+          extractionResult.cachedInputTokens,
+          extractionResult.outputTokens
+        ),
+        success: true,
+        error: null
+      });
+
+      return { status: 200, body: { ingestId, status: "pending_match", error: matchDecision.reason } };
+    }
+
+    const session = getSession(matchDecision.sessionId);
+    const team = session?.teamId ? getTeam(session.teamId) : null;
     const sessionPlayers = session ? getPlayersBySession(session.id) : [];
     const playerIdentities = sessionPlayers.map((player) => ({
       playerId: player.id,
@@ -386,8 +614,6 @@ async function processIngest(
     const mappedBlue = mapPlayers(extraction.teams.blue, playerIdentities);
     const mappedOrange = mapPlayers(extraction.teams.orange, playerIdentities);
 
-    const derivedMatch = deriveMatch(extraction);
-    const signatureKey = extractionResult.dedupeSignature;
     const existingMatch = findMatchBySignature(signatureKey, session?.id ?? null);
     if (existingMatch) {
       updateScoreboardIngest(ingestId, {
@@ -397,6 +623,12 @@ async function processIngest(
       });
       return { status: 200, body: { ingestId, status: "extracted", matchId: existingMatch.id } };
     }
+
+    updateScoreboardIngest(ingestId, {
+      sessionId: session?.id ?? null,
+      teamId: team?.id ?? null,
+      focusPlaylistId: matchDecision.focusPlaylistId ?? null
+    });
 
     const match = insertMatch({
       sessionId: session?.id ?? null,
@@ -529,6 +761,178 @@ async function processIngest(
       body: { ingestId, status: "failed", error: error?.message || "Failed to process ingest" }
     };
   }
+}
+
+type SessionMatchCandidate = {
+  sessionId: number;
+  teamId: number | null;
+  mode: string;
+  score: number;
+  matchedCount: number;
+  exactCount: number;
+  fuzzyCount: number;
+  side: "blue" | "orange";
+};
+
+function resolveSessionMatch(extraction: ScoreboardExtraction): {
+  status: "matched" | "ambiguous" | "unmatched";
+  sessionId?: number;
+  reason?: string;
+  candidates: SessionMatchCandidate[];
+  blueNames: string[];
+  orangeNames: string[];
+  teamSize: number | null;
+  mode: string | null;
+  focusPlaylistId: number | null;
+} {
+  const blueNames = extraction.teams.blue.map((player) => player.name ?? "").filter((name) => name.trim().length > 0);
+  const orangeNames = extraction.teams.orange.map((player) => player.name ?? "").filter((name) => name.trim().length > 0);
+  const blueCount = blueNames.length;
+  const orangeCount = orangeNames.length;
+  const teamSize = blueCount > 0 && orangeCount > 0 && blueCount === orangeCount ? blueCount : null;
+  const mode = teamSize ? toMode(teamSize) : null;
+
+  const sessions = listActiveSessions().filter((session) => (mode ? session.mode === mode : true));
+  const candidates: SessionMatchCandidate[] = [];
+
+  sessions.forEach((session) => {
+    const roster = getPlayersBySession(session.id).map((player) => player.gamertag);
+    if (roster.length === 0) return;
+    if (teamSize !== null && roster.length !== teamSize) return;
+    const blueScore = scoreRosterMatch(roster, blueNames, "blue");
+    const orangeScore = scoreRosterMatch(roster, orangeNames, "orange");
+    const pick = blueScore.score >= orangeScore.score ? blueScore : orangeScore;
+    candidates.push({
+      sessionId: session.id,
+      teamId: session.teamId ?? null,
+      mode: session.mode,
+      score: pick.score,
+      matchedCount: pick.matchedCount,
+      exactCount: pick.exactCount,
+      fuzzyCount: pick.fuzzyCount,
+      side: pick.side
+    });
+  });
+
+  const sorted = candidates.sort((a, b) => b.score - a.score);
+  const rosterSize = teamSize ?? null;
+  const minAutoScore = rosterSize ? rosterSize * 2 - 1 : 0;
+  const highConfidence = sorted.filter(
+    (candidate) =>
+      rosterSize !== null &&
+      candidate.matchedCount >= rosterSize &&
+      candidate.score >= minAutoScore
+  );
+
+  if (highConfidence.length === 1) {
+    return {
+      status: "matched",
+      sessionId: highConfidence[0].sessionId,
+      candidates: sorted.slice(0, 5),
+      blueNames,
+      orangeNames,
+      teamSize,
+      mode,
+      focusPlaylistId: mode ? getFocusPlaylistId(mode) : null
+    };
+  }
+
+  if (highConfidence.length > 1) {
+    return {
+      status: "ambiguous",
+      reason: "Multiple sessions match this roster.",
+      candidates: sorted.slice(0, 5),
+      blueNames,
+      orangeNames,
+      teamSize,
+      mode,
+      focusPlaylistId: mode ? getFocusPlaylistId(mode) : null
+    };
+  }
+
+  return {
+    status: "unmatched",
+    reason: "No high-confidence session match.",
+    candidates: sorted.slice(0, 5),
+    blueNames,
+    orangeNames,
+    teamSize,
+    mode,
+    focusPlaylistId: mode ? getFocusPlaylistId(mode) : null
+  };
+}
+
+function toMode(teamSize: number): string | null {
+  if (teamSize === 1) return "solo";
+  if (teamSize === 2) return "2v2";
+  if (teamSize === 3) return "3v3";
+  if (teamSize === 4) return "4v4";
+  return null;
+}
+
+function normalizeName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\[[^\]]*]/g, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function matchScore(target: string, candidate: string): { score: number; exact: boolean; fuzzy: boolean } {
+  const a = normalizeName(target);
+  const b = normalizeName(candidate);
+  if (!a || !b) return { score: 0, exact: false, fuzzy: false };
+  if (a === b) return { score: 2, exact: true, fuzzy: false };
+  if (a.length >= 4 && b.includes(a)) return { score: 1, exact: false, fuzzy: true };
+  if (b.length >= 4 && a.includes(b)) return { score: 1, exact: false, fuzzy: true };
+  const distance = editDistance(a, b);
+  if (distance <= 1 || (Math.max(a.length, b.length) <= 6 && distance <= 2)) {
+    return { score: 1, exact: false, fuzzy: true };
+  }
+  return { score: 0, exact: false, fuzzy: false };
+}
+
+function scoreRosterMatch(roster: string[], names: string[], side: "blue" | "orange") {
+  const used = new Set<number>();
+  let score = 0;
+  let matchedCount = 0;
+  let exactCount = 0;
+  let fuzzyCount = 0;
+
+  roster.forEach((player) => {
+    let bestIndex = -1;
+    let best = { score: 0, exact: false, fuzzy: false };
+    names.forEach((name, index) => {
+      if (used.has(index)) return;
+      const candidateScore = matchScore(player, name);
+      if (candidateScore.score > best.score) {
+        best = candidateScore;
+        bestIndex = index;
+      }
+    });
+    if (best.score > 0 && bestIndex >= 0) {
+      used.add(bestIndex);
+      score += best.score;
+      matchedCount += 1;
+      if (best.exact) exactCount += 1;
+      if (best.fuzzy) fuzzyCount += 1;
+    }
+  });
+
+  return { score, matchedCount, exactCount, fuzzyCount, side };
 }
 
 export default router;

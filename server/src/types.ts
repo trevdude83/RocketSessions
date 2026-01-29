@@ -82,7 +82,7 @@ export interface ScoreboardIngestRow {
   id: number;
   deviceId: number;
   receivedAt: string;
-  status: "received" | "extracting" | "extracted" | "failed";
+  status: "received" | "extracting" | "extracted" | "failed" | "pending_match";
   errorMessage: string | null;
   sessionId: number | null;
   teamId: number | null;
@@ -135,6 +135,22 @@ export interface ScoreboardAuditRow {
   costUsd: number | null;
   success: number;
   error: string | null;
+}
+
+export interface ScoreboardUnmatchedRow {
+  id: number;
+  ingestId: number;
+  createdAt: string;
+  status: "pending" | "assigned" | "ignored";
+  mode: string | null;
+  teamSize: number | null;
+  blueNamesJson: string;
+  orangeNamesJson: string;
+  candidatesJson: string | null;
+  rawExtractionJson: string;
+  derivedMatchJson: string;
+  signatureKey: string | null;
+  assignedSessionId: number | null;
 }
 
 

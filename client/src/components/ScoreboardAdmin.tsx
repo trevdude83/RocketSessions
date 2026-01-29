@@ -4,12 +4,15 @@ import {
   getScoreboardSettings,
   listScoreboardDevices,
   listScoreboardIngests,
+  listScoreboardUnmatched,
   processScoreboardIngest,
+  assignScoreboardUnmatched,
+  listSessions,
   registerScoreboardDevice,
   setScoreboardDeviceEnabled,
   setScoreboardSettings
 } from "../api";
-import { ScoreboardDevice, ScoreboardIngest } from "../types";
+import { ScoreboardDevice, ScoreboardIngest, ScoreboardUnmatched, Session } from "../types";
 import ThemeToggle from "./ThemeToggle";
 import BuildInfo from "./BuildInfo";
 import ImpersonationBanner from "./ImpersonationBanner";
@@ -20,9 +23,13 @@ export default function ScoreboardAdmin() {
   const navigate = useNavigate();
   const [devices, setDevices] = useState<ScoreboardDevice[]>([]);
   const [ingests, setIngests] = useState<ScoreboardIngest[]>([]);
+  const [unmatched, setUnmatched] = useState<ScoreboardUnmatched[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [assigningId, setAssigningId] = useState<number | null>(null);
+  const [assignSelection, setAssignSelection] = useState<Record<number, number>>({});
   const [retentionDays, setRetentionDays] = useState<string>("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [registerName, setRegisterName] = useState("");
@@ -33,13 +40,17 @@ export default function ScoreboardAdmin() {
     setLoading(true);
     setMessage(null);
     try {
-      const [deviceData, ingestData, settings] = await Promise.all([
+      const [deviceData, ingestData, settings, unmatchedData, sessionData] = await Promise.all([
         listScoreboardDevices(),
         listScoreboardIngests(50),
-        getScoreboardSettings()
+        getScoreboardSettings(),
+        listScoreboardUnmatched(50),
+        listSessions()
       ]);
       setDevices(deviceData);
       setIngests(ingestData);
+      setUnmatched(unmatchedData);
+      setSessions(sessionData);
       setRetentionDays(settings.retentionDays !== null ? String(settings.retentionDays) : "");
     } catch (err: any) {
       setMessage(err.message || "Failed to load ScoreboardCam data.");
@@ -67,6 +78,25 @@ export default function ScoreboardAdmin() {
       setMessage(err.message || "Failed to process ingest.");
     } finally {
       setProcessingId(null);
+    }
+  }
+
+  async function handleAssignUnmatched(unmatchedId: number) {
+    const sessionId = assignSelection[unmatchedId];
+    if (!sessionId) {
+      setMessage("Choose a session to assign.");
+      return;
+    }
+    setAssigningId(unmatchedId);
+    setMessage(null);
+    try {
+      await assignScoreboardUnmatched(unmatchedId, sessionId);
+      setMessage(`Unmatched ingest assigned to session #${sessionId}.`);
+      await loadScoreboard();
+    } catch (err: any) {
+      setMessage(err.message || "Failed to assign unmatched ingest.");
+    } finally {
+      setAssigningId(null);
     }
   }
 
@@ -122,6 +152,13 @@ export default function ScoreboardAdmin() {
       setMessage("Failed to copy device key.");
     }
   }
+
+  function formatRoster(names: string[]) {
+    if (!names || names.length === 0) return "-";
+    return names.join(", ");
+  }
+
+  const activeSessions = sessions.filter((session) => !session.isEnded);
 
   return (
     <div className="app">
@@ -249,6 +286,64 @@ export default function ScoreboardAdmin() {
                     >
                       {device.isEnabled ? "Disable" : "Enable"}
                     </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="section-header">
+            <h2>Unmatched ingests</h2>
+          </div>
+          <p className="panel-help">Queue of OCR captures that could not be confidently matched to an active session.</p>
+          {unmatched.length === 0 && <p>No unmatched ingests.</p>}
+          {unmatched.length > 0 && (
+            <div className="team-history-table extra">
+              <div className="team-history-row header">
+                <span>Ingest</span>
+                <span>Mode</span>
+                <span>Blue roster</span>
+                <span>Orange roster</span>
+                <span>Top candidates</span>
+                <span>Assign</span>
+              </div>
+              {unmatched.map((item) => (
+                <div className="team-history-row" key={item.id}>
+                  <span>#{item.ingestId}</span>
+                  <span>{item.mode ?? "-"}</span>
+                  <span>{formatRoster(item.blueNames)}</span>
+                  <span>{formatRoster(item.orangeNames)}</span>
+                  <span className="signature-cell" title={JSON.stringify(item.candidates ?? [])}>
+                    {(item.candidates ?? [])
+                      .slice(0, 2)
+                      .map((candidate) => `#${candidate.sessionId} (${candidate.score})`)
+                      .join(", ") || "-"}
+                  </span>
+                  <span>
+                    <div className="inline-actions">
+                      <select
+                        value={assignSelection[item.id] ?? ""}
+                        onChange={(e) =>
+                          setAssignSelection((prev) => ({ ...prev, [item.id]: Number(e.target.value) }))
+                        }
+                      >
+                        <option value="">Select session</option>
+                        {activeSessions.map((session) => (
+                          <option key={session.id} value={session.id}>
+                            #{session.id} {session.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="ghost"
+                        disabled={assigningId === item.id}
+                        onClick={() => handleAssignUnmatched(item.id)}
+                      >
+                        {assigningId === item.id ? "Assigning..." : "Assign"}
+                      </button>
+                    </div>
                   </span>
                 </div>
               ))}

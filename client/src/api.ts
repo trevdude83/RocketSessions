@@ -1,4 +1,4 @@
-import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, ScoreboardAuditEntry, GameStatRow, ScoreboardDevice, ScoreboardIngest } from "./types";
+import { AuthUser, Session, SessionDetail, SummaryResponse, TimeseriesPoint, SnapshotSummary, DbMetricPoint, CoachReport, CoachReportListItem, Team, TeamCoachReportListItem, TeamAggregateCoachReport, TeamPlayerPeakRating, TeamPlayerCurrentRank, CoachAuditEntry, ScoreboardAuditEntry, GameStatRow, ScoreboardDevice, ScoreboardIngest, ScoreboardUnmatched } from "./types";
 
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -534,6 +534,20 @@ export async function registerScoreboardDevice(name?: string): Promise<{ deviceI
 
 export async function listScoreboardIngests(limit = 50): Promise<ScoreboardIngest[]> {
   const res = await apiFetch(`/api/v1/scoreboard/admin/ingests?limit=${limit}`);
+  return handleJson(res);
+}
+
+export async function listScoreboardUnmatched(limit = 50): Promise<ScoreboardUnmatched[]> {
+  const res = await apiFetch(`/api/v1/scoreboard/admin/unmatched?limit=${limit}`);
+  return handleJson(res);
+}
+
+export async function assignScoreboardUnmatched(unmatchedId: number, sessionId: number): Promise<{ ok: boolean; matchId: number; deduped: boolean }> {
+  const res = await apiFetch(`/api/v1/scoreboard/admin/unmatched/${unmatchedId}/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId })
+  });
   return handleJson(res);
 }
 

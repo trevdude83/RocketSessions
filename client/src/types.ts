@@ -253,7 +253,7 @@ export interface ScoreboardIngest {
   id: number;
   deviceId: number;
   receivedAt: string;
-  status: "received" | "extracting" | "extracted" | "failed";
+  status: "received" | "extracting" | "extracted" | "failed" | "pending_match";
   errorMessage: string | null;
   sessionId: number | null;
   teamId: number | null;
@@ -261,4 +261,25 @@ export interface ScoreboardIngest {
   dedupeKey: string | null;
   matchId: number | null;
   signatureKey?: string | null;
+}
+
+export interface ScoreboardUnmatched {
+  id: number;
+  ingestId: number;
+  createdAt: string;
+  status: "pending" | "assigned" | "ignored";
+  mode: string | null;
+  teamSize: number | null;
+  blueNames: string[];
+  orangeNames: string[];
+  candidates: Array<{
+    sessionId: number;
+    teamId: number | null;
+    mode: string;
+    score: number;
+    matchedCount: number;
+    exactCount: number;
+    fuzzyCount: number;
+    side: "blue" | "orange";
+  }> | null;
 }

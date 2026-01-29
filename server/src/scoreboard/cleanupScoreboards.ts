@@ -32,6 +32,7 @@ export async function cleanupScoreboards(): Promise<void> {
   const dataDir = path.join(baseDir, "data", "scoreboards");
 
   const deleteImagesStmt = db.prepare("DELETE FROM scoreboard_ingest_images WHERE ingestId = ?");
+  const deleteUnmatchedStmt = db.prepare("DELETE FROM scoreboard_unmatched WHERE ingestId = ?");
   const deleteIngestStmt = db.prepare("DELETE FROM scoreboard_ingests WHERE id = ?");
 
   for (const ingest of ingests) {
@@ -42,6 +43,7 @@ export async function cleanupScoreboards(): Promise<void> {
       console.warn(`Failed to remove images for ingest ${ingest.id}:`, (error as Error).message);
     }
     deleteImagesStmt.run(ingest.id);
+    deleteUnmatchedStmt.run(ingest.id);
     deleteIngestStmt.run(ingest.id);
   }
 
