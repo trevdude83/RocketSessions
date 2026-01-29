@@ -112,6 +112,8 @@ export default function ChartsPanel({ sessionId, players }: Props) {
         const prevValue = prev[key];
         if (typeof current === "number" && typeof prevValue === "number") {
           next[key] = current - prevValue;
+        } else if (typeof current === "number" && typeof prevValue !== "number") {
+          next[key] = current;
         } else {
           next[key] = null;
         }
