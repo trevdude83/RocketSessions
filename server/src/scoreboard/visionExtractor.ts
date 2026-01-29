@@ -274,7 +274,7 @@ async function applyFocusedPasses(
   extraction: ScoreboardExtraction,
   addUsage: (usage?: OpenAI.Responses.ResponseUsage) => void
 ): Promise<ScoreboardExtraction> {
-  const multiPassEnabled = (process.env.SCOREBOARD_MULTI_PASS ?? "0") === "1";
+  const multiPassEnabled = (process.env.SCOREBOARD_MULTI_PASS ?? "1") !== "0";
   if (!multiPassEnabled) return extraction;
 
   const blueNames = extraction.teams.blue.map((player) => player.name ?? "");
