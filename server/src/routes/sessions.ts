@@ -1,4 +1,4 @@
-import { addSessionShare, db, createSession, createPlayers, createTeam, deleteSession, endSession, findTeamByRoster, getBaselineSnapshot, getDbMetrics, getLatestSnapshot, getLatestSnapshotByGamertag, getPlayersBySession, getRecentSnapshots, getSession, getSessionForUser, getSessionTeamStats, getTeam, getTeamForUser, getUserByEmail, getUserById, getUserByUsername, insertCoachAudit, insertCoachReport, insertSessionTeamStats, insertSnapshot, recordDbMetric, setSessionActive, setSessionManualMode, setSessionMatchIndex, getLatestCoachReport, listCoachAudit, listCoachReports, listCoachReportsByTeam, listSessions, listSessionsForUser, listTeamStats, listTeams, listTeamsForUser, removeSessionShare, setSetting, getSetting, updateTeamName, insertTeamCoachReport, getLatestTeamCoachReport, listTeamCoachReports, getLatestAvatarUrlByGamertag } from "../db.js";
+import { addSessionShare, db, createSession, createPlayers, createTeam, deleteSession, endSession, findTeamByRoster, getBaselineSnapshot, getDbMetrics, getLatestSnapshot, getLatestSnapshotByGamertag, getPlayersBySession, getRecentSnapshots, getSession, getSessionForUser, getSessionTeamStats, getTeam, getTeamForUser, getUserByEmail, getUserById, getUserByUsername, insertCoachAudit, insertCoachReport, insertSessionTeamStats, insertSnapshot, recordDbMetric, setSessionActive, setSessionManualMode, setSessionMatchIndex, getLatestCoachReport, listCoachAudit, listCoachReports, listCoachReportsByTeam, listSessions, listSessionsForUser, listTeamStats, listTeams, listTeamsForUser, removeSessionShare, setSetting, getSetting, updateTeamName, insertTeamCoachReport, getLatestTeamCoachReport, listTeamCoachReports, getLatestAvatarUrlByGamertag, upsertTeamRankOverride, listTeamRankOverrides, deleteTeamRankOverrides } from "../db.js";
 import { extractMetrics } from "../trn/extractMetrics.js";
 import { DerivedMetrics, PlayerInput, SessionRow } from "../types.js";
 import { buildCoachPacket } from "../coach/buildCoachPacket.js";
@@ -334,7 +334,23 @@ router.get("/teams/:id/peaks", (req, res) => {
   const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   const players = parseJson<PlayerInput[]>(team.playersJson) || [];
+  const overrides = listTeamRankOverrides(teamId, "peak").reduce((acc, row) => {
+    acc[row.normalizedGamertag] = row;
+    return acc;
+  }, {} as Record<string, { payloadJson: string }>);
   const payload = players.map((player) => {
+    const override = overrides[normalizeGamertag(player.gamertag)]?.payloadJson;
+    if (override) {
+      const parsed = parseJson<unknown>(override) as Record<string, unknown> | null;
+      if (parsed) {
+        return {
+          gamertag: player.gamertag,
+          platform: player.platform,
+          capturedAt: typeof parsed.capturedAt === "string" ? parsed.capturedAt : null,
+          peakRating: parsed.peakRating ?? null
+        };
+      }
+    }
     const latest = getLatestSnapshotByGamertag(player.gamertag);
     const raw = parseJson<unknown>(latest?.rawJson);
     const peakRating = raw ? parsePeakRating(raw, team.mode) : null;
@@ -354,8 +370,29 @@ router.get("/teams/:id/current-ranks", (req, res) => {
   const team = getTeamForUser(teamId, userId, isAdmin);
   if (!team) return res.status(404).json({ error: "Team not found" });
   const players = parseJson<PlayerInput[]>(team.playersJson) || [];
+  const overrides = listTeamRankOverrides(teamId, "current").reduce((acc, row) => {
+    acc[row.normalizedGamertag] = row;
+    return acc;
+  }, {} as Record<string, { payloadJson: string }>);
   const playlistId = getFocusPlaylistId(team.mode);
   const payload = players.map((player) => {
+    const override = overrides[normalizeGamertag(player.gamertag)]?.payloadJson;
+    if (override) {
+      const parsed = parseJson<unknown>(override) as Record<string, unknown> | null;
+      if (parsed) {
+        return {
+          gamertag: player.gamertag,
+          platform: player.platform,
+          capturedAt: typeof parsed.capturedAt === "string" ? parsed.capturedAt : null,
+          playlistName: typeof parsed.playlistName === "string" ? parsed.playlistName : null,
+          rankLabel: typeof parsed.rankLabel === "string" ? parsed.rankLabel : null,
+          rating: typeof parsed.rating === "number" ? parsed.rating : null,
+          iconUrl: typeof parsed.iconUrl === "string" ? parsed.iconUrl : null,
+          rankTierIndex: typeof parsed.rankTierIndex === "number" ? parsed.rankTierIndex : null,
+          rankDivisionIndex: typeof parsed.rankDivisionIndex === "number" ? parsed.rankDivisionIndex : null
+        };
+      }
+    }
     const latest = getLatestSnapshotByGamertag(player.gamertag);
     const derived = parseJson<DerivedMetrics>(latest?.derivedJson);
     const playlist = derived?.playlists?.[playlistId] as Record<string, unknown> | undefined;
@@ -385,6 +422,128 @@ router.get("/teams/:id/current-ranks", (req, res) => {
     };
   });
   res.json(payload);
+});
+
+router.post("/teams/:id/ranks/import", (req, res) => {
+  const teamId = Number(req.params.id);
+  const { userId, isAdmin } = resolveAccess(req);
+  const team = getTeamForUser(teamId, userId, isAdmin);
+  if (!team) return res.status(404).json({ error: "Team not found" });
+
+  const { currentRanks, peakRatings, replace, source, rawPayloads } = req.body as {
+    currentRanks?: Array<Record<string, unknown>>;
+    peakRatings?: Array<Record<string, unknown>>;
+    replace?: boolean;
+    source?: string;
+    rawPayloads?: Array<Record<string, unknown>>;
+  };
+
+  const sourceLabel = typeof source === "string" && source.trim().length > 0 ? source.trim() : null;
+
+  if (!Array.isArray(currentRanks) && !Array.isArray(peakRatings) && !Array.isArray(rawPayloads)) {
+    return res.status(400).json({ error: "Provide currentRanks/peakRatings arrays or rawPayloads." });
+  }
+
+  if (replace && Array.isArray(currentRanks)) {
+    deleteTeamRankOverrides(teamId, "current");
+  }
+  if (replace && Array.isArray(peakRatings)) {
+    deleteTeamRankOverrides(teamId, "peak");
+  }
+
+  let inserted = 0;
+  let skipped = 0;
+
+  const saveEntries = (kind: "current" | "peak", entries: Array<Record<string, unknown>> | undefined) => {
+    if (!entries) return;
+    entries.forEach((entry) => {
+      const gamertag = typeof entry.gamertag === "string" ? entry.gamertag.trim() : "";
+      if (!gamertag) {
+        skipped += 1;
+        return;
+      }
+      const normalized = normalizeGamertag(gamertag);
+      const payloadJson = JSON.stringify(entry);
+      upsertTeamRankOverride({
+        teamId,
+        gamertag,
+        normalizedGamertag: normalized,
+        kind,
+        payloadJson,
+        source: sourceLabel
+      });
+      inserted += 1;
+    });
+  };
+
+  saveEntries("current", Array.isArray(currentRanks) ? currentRanks : undefined);
+  saveEntries("peak", Array.isArray(peakRatings) ? peakRatings : undefined);
+
+  if (Array.isArray(rawPayloads)) {
+    const roster = new Set(
+      (parseJson<PlayerInput[]>(team.playersJson) || [])
+        .map((player) => normalizeGamertag(player.gamertag))
+        .filter(Boolean)
+    );
+    rawPayloads.forEach((payload) => {
+      const gamertag = toText((payload as any)?.data?.platformInfo?.platformUserHandle);
+      if (!gamertag) {
+        skipped += 1;
+        return;
+      }
+      const normalized = normalizeGamertag(gamertag);
+      if (roster.size > 0 && !roster.has(normalized)) {
+        skipped += 1;
+        return;
+      }
+      const capturedAt = toText((payload as any)?.data?.metadata?.lastUpdated?.value) ?? null;
+      const current = parseCurrentRank(payload, team.mode);
+      if (current) {
+        upsertTeamRankOverride({
+          teamId,
+          gamertag,
+          normalizedGamertag: normalized,
+          kind: "current",
+          payloadJson: JSON.stringify({
+            gamertag,
+            platform: toText((payload as any)?.data?.platformInfo?.platformSlug) ?? "xbl",
+            capturedAt,
+            playlistName: current.playlistName,
+            rankLabel: current.rankLabel,
+            rating: current.rating,
+            iconUrl: current.iconUrl,
+            rankTierIndex: current.rankTierIndex,
+            rankDivisionIndex: current.rankDivisionIndex
+          }),
+          source: sourceLabel
+        });
+        inserted += 1;
+      } else {
+        skipped += 1;
+      }
+      const peak = parsePeakRating(payload, team.mode);
+      if (peak) {
+        upsertTeamRankOverride({
+          teamId,
+          gamertag,
+          normalizedGamertag: normalized,
+          kind: "peak",
+          payloadJson: JSON.stringify({
+            gamertag,
+            platform: toText((payload as any)?.data?.platformInfo?.platformSlug) ?? "xbl",
+            capturedAt,
+            peakRating: peak
+          }),
+          source: sourceLabel
+        });
+        inserted += 1;
+      } else {
+        skipped += 1;
+      }
+    });
+  }
+
+  res.json({ ok: true, inserted, skipped });
 });
 
 router.get("/sessions/:id", (req, res) => {
@@ -771,6 +930,47 @@ function parsePeakRating(payload: unknown, mode?: string | null): {
     if (current.value === null) return best;
     return current.value > best.value ? current : best;
   });
+}
+
+function parseCurrentRank(payload: unknown, mode?: string | null): {
+  playlistName: string | null;
+  rankLabel: string | null;
+  rating: number | null;
+  iconUrl: string | null;
+  rankTierIndex: number | null;
+  rankDivisionIndex: number | null;
+} | null {
+  const segments = (payload as any)?.data?.segments;
+  if (!Array.isArray(segments)) return null;
+  const focusName = getFocusPlaylistName(mode ?? "");
+  const focusId = getFocusPlaylistId(mode ?? "");
+  const playlistSegments = segments.filter((segment: any) => segment?.type === "playlist");
+  if (!playlistSegments.length) return null;
+  const candidate = playlistSegments.find((segment: any) => {
+    const playlistId = toNumber(segment?.attributes?.playlistId);
+    const name = toText(segment?.metadata?.name);
+    if (focusId !== null && playlistId === focusId) return true;
+    if (focusName && name === focusName) return true;
+    return false;
+  }) ?? playlistSegments[0];
+  const tier = candidate?.stats?.tier;
+  const division = candidate?.stats?.division;
+  const rating = candidate?.stats?.rating;
+  const tierName = toText(tier?.metadata?.name ?? rating?.metadata?.tierName);
+  const divisionName = toText(division?.metadata?.name);
+  const rankLabel = tierName
+    ? divisionName
+      ? `${tierName} ${divisionName}`
+      : tierName
+    : null;
+  return {
+    playlistName: toText(candidate?.metadata?.name),
+    rankLabel,
+    rating: toNumber(rating?.value ?? rating?.displayValue),
+    iconUrl: toText(rating?.metadata?.iconUrl ?? tier?.metadata?.iconUrl),
+    rankTierIndex: toNumber(tier?.value),
+    rankDivisionIndex: toNumber(division?.value)
+  };
 }
 
 function normalizeSessions(input: unknown): any[] {

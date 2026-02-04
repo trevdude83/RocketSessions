@@ -264,13 +264,24 @@ db.exec(`
     success INTEGER NOT NULL,
     error TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS team_rank_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teamId INTEGER NOT NULL,
+    gamertag TEXT NOT NULL,
+    normalizedGamertag TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    payloadJson TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    source TEXT
+  );
 `);
 
 try {
   db.exec("DROP TABLE IF EXISTS polling_logs");
 } catch {}
 
-db.exec(`
+  db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_scoreboard_devices_key ON scoreboard_devices(deviceKeyHash);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_scoreboard_ingests_dedupe ON scoreboard_ingests(dedupeKey);
   CREATE INDEX IF NOT EXISTS idx_scoreboard_ingests_device ON scoreboard_ingests(deviceId);
@@ -282,6 +293,8 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_matches_session ON matches(sessionId);
     CREATE INDEX IF NOT EXISTS idx_match_players_match ON match_players(matchId);
     CREATE INDEX IF NOT EXISTS idx_scoreboard_audit_created ON scoreboard_audit(createdAt);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_team_rank_overrides_unique ON team_rank_overrides(teamId, normalizedGamertag, kind);
+    CREATE INDEX IF NOT EXISTS idx_team_rank_overrides_team ON team_rank_overrides(teamId);
   `);
 
 try {
@@ -440,6 +453,10 @@ try {
 } catch {}
 try {
   db.exec("ALTER TABLE auth_sessions ADD COLUMN impersonatedByUserId INTEGER");
+} catch {}
+
+try {
+  db.exec("ALTER TABLE team_rank_overrides ADD COLUMN normalizedGamertag TEXT NOT NULL");
 } catch {}
 
 export function createSession(
@@ -1433,6 +1450,41 @@ export function setAuthSessionImpersonation(sessionId: number, impersonatedUserI
 export function clearAuthSessionImpersonation(sessionId: number): void {
   db.prepare("UPDATE auth_sessions SET impersonatedUserId = NULL, impersonatedByUserId = NULL WHERE id = ?")
     .run(sessionId);
+}
+
+export function upsertTeamRankOverride(input: {
+  teamId: number;
+  gamertag: string;
+  normalizedGamertag: string;
+  kind: "current" | "peak";
+  payloadJson: string;
+  source: string | null;
+}): void {
+  const updatedAt = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO team_rank_overrides (teamId, gamertag, normalizedGamertag, kind, payloadJson, updatedAt, source) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+    "ON CONFLICT(teamId, normalizedGamertag, kind) DO UPDATE SET gamertag = excluded.gamertag, payloadJson = excluded.payloadJson, updatedAt = excluded.updatedAt, source = excluded.source"
+  ).run(
+    input.teamId,
+    input.gamertag,
+    input.normalizedGamertag,
+    input.kind,
+    input.payloadJson,
+    updatedAt,
+    input.source
+  );
+}
+
+export function listTeamRankOverrides(teamId: number, kind: "current" | "peak"): { gamertag: string; normalizedGamertag: string; payloadJson: string; updatedAt: string; source: string | null }[] {
+  return db
+    .prepare(
+      "SELECT gamertag, normalizedGamertag, payloadJson, updatedAt, source FROM team_rank_overrides WHERE teamId = ? AND kind = ?"
+    )
+    .all(teamId, kind) as { gamertag: string; normalizedGamertag: string; payloadJson: string; updatedAt: string; source: string | null }[];
+}
+
+export function deleteTeamRankOverrides(teamId: number, kind: "current" | "peak"): void {
+  db.prepare("DELETE FROM team_rank_overrides WHERE teamId = ? AND kind = ?").run(teamId, kind);
 }
 
 export function addSessionShare(sessionId: number, userId: number, sharedByUserId: number | null): void {

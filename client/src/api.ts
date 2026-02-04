@@ -475,6 +475,24 @@ export async function getTeamCurrentRanks(teamId: number): Promise<TeamPlayerCur
   return handleJson(res);
 }
 
+export async function importTeamRanks(
+  teamId: number,
+  payload: {
+    currentRanks?: TeamPlayerCurrentRank[];
+    peakRatings?: TeamPlayerPeakRating[];
+    replace?: boolean;
+    source?: string;
+    rawPayloads?: unknown[];
+  }
+): Promise<{ ok: boolean; inserted: number; skipped: number }> {
+  const res = await apiFetch(`/api/teams/${teamId}/ranks/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return handleJson(res);
+}
+
 
 export async function getTeamCoachPrompt(): Promise<{ prompt: string | null }> {
   const res = await apiFetch("/api/settings/team-coach-prompt");

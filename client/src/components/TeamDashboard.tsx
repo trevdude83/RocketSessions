@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { generateTeamCoachReport, getLatestTeamCoachReport, getTeam, getTeamCurrentRanks, getTeamPeakRatings, listTeamAggregateCoachReports, listTeamCoachReports } from "../api";
+import { generateTeamCoachReport, getLatestTeamCoachReport, getTeam, getTeamCurrentRanks, getTeamPeakRatings, importTeamRanks, listTeamAggregateCoachReports, listTeamCoachReports } from "../api";
 import { Team, TeamAggregateCoachReport, TeamCoachReportListItem, TeamPlayerCurrentRank, TeamPlayerPeakRating } from "../types";
 import { formatRank } from "../utils/rank";
+import { useAuth } from "../auth";
 import ThemeToggle from "./ThemeToggle";
 import BuildInfo from "./BuildInfo";
 import ImpersonationBanner from "./ImpersonationBanner";
@@ -49,6 +50,7 @@ export default function TeamDashboard() {
   const { id } = useParams();
   const teamId = Number(id);
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [team, setTeam] = useState<Team | null>(null);
   const [reports, setReports] = useState<TeamCoachReportListItem[]>([]);
   const [teamCoachReports, setTeamCoachReports] = useState<TeamAggregateCoachReport[]>([]);
@@ -59,6 +61,9 @@ export default function TeamDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [chartMetric, setChartMetric] = useState<string | null>(null);
   const [showExtraColumns, setShowExtraColumns] = useState(false);
+  const [rankPayload, setRankPayload] = useState<string>("");
+  const [rankMessage, setRankMessage] = useState<string | null>(null);
+  const [rankUploading, setRankUploading] = useState(false);
 
   useEffect(() => {
     if (!teamId) return;
@@ -258,6 +263,50 @@ const chartData = useMemo(() => {
     }
   }
 
+  async function handleImportRanks() {
+    if (!teamId) return;
+    setRankMessage(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rankPayload);
+    } catch {
+      setRankMessage("Invalid JSON payload.");
+      return;
+    }
+    if (!parsed || typeof parsed !== "object") {
+      setRankMessage("Payload must be a JSON object.");
+      return;
+    }
+    const payload = parsed as { currentRanks?: TeamPlayerCurrentRank[]; peakRatings?: TeamPlayerPeakRating[]; replace?: boolean; source?: string; rawPayloads?: unknown[] };
+    let submitPayload: { currentRanks?: TeamPlayerCurrentRank[]; peakRatings?: TeamPlayerPeakRating[]; replace?: boolean; source?: string; rawPayloads?: unknown[] } = payload;
+    const looksLikeTrn = Boolean((payload as any)?.data?.platformInfo);
+    const looksLikeTrnArray = Array.isArray(parsed) && parsed.some((item) => Boolean((item as any)?.data?.platformInfo));
+    if (looksLikeTrn) {
+      submitPayload = { rawPayloads: [parsed] };
+    } else if (looksLikeTrnArray) {
+      submitPayload = { rawPayloads: parsed as unknown[] };
+    }
+    if (!Array.isArray(submitPayload.currentRanks) && !Array.isArray(submitPayload.peakRatings) && !Array.isArray(submitPayload.rawPayloads)) {
+      setRankMessage("Provide currentRanks/peakRatings arrays or a raw TRN payload.");
+      return;
+    }
+    setRankUploading(true);
+    try {
+      const result = await importTeamRanks(teamId, submitPayload);
+      setRankMessage(`Imported ${result.inserted} entries (skipped ${result.skipped}).`);
+      const [peaks, ranks] = await Promise.all([
+        getTeamPeakRatings(teamId),
+        getTeamCurrentRanks(teamId)
+      ]);
+      setPlayerPeaks(peaks);
+      setPlayerRanks(ranks);
+    } catch (err: any) {
+      setRankMessage(err.message || "Failed to import ranks.");
+    } finally {
+      setRankUploading(false);
+    }
+  }
+
   if (!team) {
     return (
       <div className="app">
@@ -298,6 +347,8 @@ const chartData = useMemo(() => {
       </div>
     );
   }
+
+  const canEditRanks = user?.role === "admin" || (typeof team.userId === "number" && user?.id === team.userId);
 
   return (
     <div className="app">
@@ -928,6 +979,33 @@ const chartData = useMemo(() => {
             )}
           </details>
         </section>
+        {canEditRanks && (
+          <section className="panel">
+            <details className="collapsible">
+              <summary>
+                <div className="summary-title">
+                  <h3>Rank overrides</h3>
+                  <span className="note">Upload a JSON payload to refresh peak/current ranks.</span>
+                </div>
+                <span className="chevron" aria-hidden="true"></span>
+              </summary>
+              <div className="section-header">
+                <div className="note">Paste a raw TRN JSON response, or use {"{ currentRanks: [...], peakRatings: [...], replace: true }"}.</div>
+                <button onClick={handleImportRanks} disabled={rankUploading || !rankPayload.trim()}>
+                  {rankUploading ? "Uploading..." : "Import JSON"}
+                </button>
+              </div>
+              {rankMessage && <div className="note">{rankMessage}</div>}
+              <textarea
+                className="text-area"
+                rows={10}
+                placeholder={`{\n  "replace": true,\n  "currentRanks": [\n    {\n      "gamertag": "PlayerOne",\n      "platform": "xbl",\n      "capturedAt": "2026-02-04T18:00:00Z",\n      "playlistName": "Ranked Doubles 2v2",\n      "rankLabel": "Champion I",\n      "rating": 1023,\n      "iconUrl": "https://.../rank.png",\n      "rankTierIndex": 10,\n      "rankDivisionIndex": 2\n    }\n  ],\n  "peakRatings": [\n    {\n      "gamertag": "PlayerOne",\n      "platform": "xbl",\n      "capturedAt": "2026-01-20T12:00:00Z",\n      "peakRating": {\n        "playlistName": "Ranked Doubles 2v2",\n        "value": 1080,\n        "season": 14,\n        "iconUrl": "https://.../rank.png",\n        "rankName": "Champion II",\n        "division": "Div II"\n      }\n    }\n  ]\n}`}
+                value={rankPayload}
+                onChange={(event) => setRankPayload(event.target.value)}
+              />
+            </details>
+          </section>
+        )}
       </main>
       {chartMetric && (
         <div className="modal-backdrop" onClick={() => setChartMetric(null)}>

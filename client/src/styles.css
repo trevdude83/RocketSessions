@@ -1502,6 +1502,12 @@ textarea {
   color: var(--color-text);
 }
 
+.text-area {
+  width: 100%;
+  min-height: 220px;
+  margin-top: 12px;
+}
+
 .note {
   font-size: 0.85rem;
   color: var(--color-muted);
